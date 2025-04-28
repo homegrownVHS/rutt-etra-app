@@ -2,7 +2,7 @@ let cam, uploadedMedia, uploadedType = null;
 let stepSize = 6;
 
 let depthSlider, tiltXSlider, tiltYSlider, scaleSlider, densitySlider;
-let camSelect, colorPicker, resetBtn, imgInput, vidInput;
+let camSelect, imgInput, vidInput;
 let lfoDepth, lfoTiltX, lfoTiltY, lfoScale, lfoFreqSlider, lfoAmpSlider, lfoTypeSelector;
 
 let streamReady = false;
@@ -15,26 +15,8 @@ let targetRotX = 30;
 let targetRotY = 0;
 
 let lfoPhase = 0;
-
 let lfoTypes = ['saw', 'sin', 'tri'];
 let lfoTypeIndex = 0;
-
-// --- MIDI mapping based on your clarified CCs ---
-const midiMap = {
-  120: ['depthSlider'],
-  121: ['tiltXSlider'],
-  122: ['tiltYSlider'],
-  123: ['scaleSlider'],
-  124: ['densitySlider'],
-  125: ['lfoFreq'],
-  126: ['lfoAmp'],
-  127: ['colorPicker'],
-  46:  ['cycleBtn'],        // Cycle Button (LFO type)
-  32:  ['lfoDepth'],
-  33:  ['lfoTiltX'],
-  34:  ['lfoTiltY'],
-  35:  ['lfoScale']
-};
 
 function setup() {
   createCanvas(1280, 720, WEBGL);
@@ -45,8 +27,6 @@ function setup() {
   scaleSlider = select("#scaleSlider");
   densitySlider = select("#densitySlider");
   camSelect = select("#camSelect");
-  colorPicker = select("#colorPicker");
-  resetBtn = select("#resetBtn");
   imgInput = select("#imgInput");
   vidInput = select("#vidInput");
 
@@ -61,11 +41,6 @@ function setup() {
   let controlsDiv = select("#controls");
   controlsDiv.mouseOver(() => controlsHovering = true);
   controlsDiv.mouseOut(() => controlsHovering = false);
-
-  resetBtn.mousePressed(() => {
-    rotX = targetRotX = 30;
-    rotY = targetRotY = 0;
-  });
 
   imgInput.changed(handleImageUpload);
   vidInput.changed(handleVideoUpload);
@@ -90,7 +65,6 @@ function setup() {
   strokeWeight(1);
   noFill();
 
-  // --- MIDI: Set up access ---
   if (navigator.requestMIDIAccess) {
     navigator.requestMIDIAccess().then(onMIDISuccess);
   }
@@ -105,7 +79,7 @@ function startCam(deviceId) {
     cam = createCapture({ video: { deviceId: { exact: deviceId } } }, () => {
       streamReady = true;
     });
-    cam.size(width, height);
+    cam.size(640, 480);  // Force camera to 640x480
     cam.hide();
   }).catch(err => {
     console.error("Camera access error:", err);
@@ -115,13 +89,15 @@ function startCam(deviceId) {
 function handleImageUpload() {
   if (imgInput.elt.files.length > 0) {
     let file = imgInput.elt.files[0];
-    let img = createImg(URL.createObjectURL(file), '', '', () => {
-      img.hide();
+    loadImage(URL.createObjectURL(file), img => {
+      img.resize(640, 480);  // Resize the p5.Image properly
       uploadedMedia = img;
       uploadedType = 'image';
     });
   }
 }
+
+
 function handleVideoUpload() {
   if (vidInput.elt.files.length > 0) {
     let file = vidInput.elt.files[0];
@@ -129,6 +105,7 @@ function handleVideoUpload() {
       vid.hide();
       vid.loop();
       vid.volume(0);
+      vid.size(640, 480); // Resize uploaded video
       uploadedMedia = vid;
       uploadedType = 'video';
     });
@@ -140,7 +117,7 @@ function getLFOValue(type, freq) {
   if (lfoPhase > 1) lfoPhase -= 1;
 
   switch (type) {
-    case "saw": return (lfoPhase * 2.0) - 1.0; // -1 to 1
+    case "saw": return (lfoPhase * 2.0) - 1.0;
     case "sin": return sin(TWO_PI * lfoPhase);
     case "tri": return abs((lfoPhase * 4) - 2) - 1;
     default: return 0;
@@ -189,59 +166,44 @@ function draw() {
   rotX = lerp(rotX, targetRotX, 0.1);
   rotY = lerp(rotY, targetRotY, 0.1);
 
+  let bufferWidth = src.width;
+  let bufferHeight = src.height;
+  let canvasAspect = width / height;
+  let bufferAspect = bufferWidth / bufferHeight;
+  let scaleFactor = bufferAspect > canvasAspect
+    ? width / bufferWidth
+    : height / bufferHeight;
+
+  push();
   rotateX(rotX + tiltX);
   rotateY(rotY + tiltY);
-  scale(scl);
-  translate(-width / 2, -height / 2);
+  scale(scl * scaleFactor);
+  translate(-bufferWidth / 2, -bufferHeight / 2);
 
   src.loadPixels();
-  if (src.pixels.length === 0) return;
+  if (src.pixels.length === 0) {
+    pop();
+    return;
+  }
 
-  let col = colorPicker.value();
-  stroke(col);
-
-  // ===== Foreground-only scanline mode (draw only where bright) =====
-  for (let y = 0; y < src.height; y += stepSize) {
-    let started = false;
+  for (let y = 0; y < bufferHeight; y += stepSize) {
     beginShape();
-    for (let x = 0; x < src.width; x += stepSize) {
-      let index = (x + y * src.width) * 4;
-      let r = src.pixels[index];
-      let g = src.pixels[index + 1];
-      let b = src.pixels[index + 2];
-      let bright = (r + g + b) / (3 * 255);
-
-      if (bright > 0.04) { // Only start drawing if brightness is present
-        let z = map(bright, 0, 1, -abs(depth), abs(depth));
-        if (depth < 0) z *= -1;
-        vertex(x, y, z);
-        started = true;
-      } else if (started) {
-        break; // stop drawing this scanline after the last bright pixel
-      }
-    }
-    endShape();
-
-    // ==== Classic Rutt-Etra scanline mode (draw entire scanline) ====
-    
-    beginShape();
-    for (let x = 0; x < src.width; x += stepSize) {
-      let index = (x + y * src.width) * 4;
-      let r = src.pixels[index];
-      let g = src.pixels[index + 1];
-      let b = src.pixels[index + 2];
-      let bright = (r + g + b) / (3 * 255);
+    for (let x = 0; x < bufferWidth; x += stepSize) {
+      let idx = (x + y * bufferWidth) * 4;
+      let r = src.pixels[idx];
+      let g = src.pixels[idx + 1];
+      let b = src.pixels[idx + 2];
+      let bright = (r + g + b) / (3 * 255); 
       let z = map(bright, 0, 1, -abs(depth), abs(depth));
       if (depth < 0) z *= -1;
+      stroke(r, g, b);
       vertex(x, y, z);
     }
     endShape();
-    
   }
+  pop();
 }
 
-
-// ---- MIDI ----
 function onMIDISuccess(midiAccess) {
   for (let input of midiAccess.inputs.values()) {
     input.onmidimessage = handleCustomMIDIMessage;
@@ -250,86 +212,32 @@ function onMIDISuccess(midiAccess) {
 
 function handleCustomMIDIMessage(message) {
   const [status, cc, val] = message.data;
-  //console.log('MIDI:', {status, cc, val});
-  
-  // Cycle button: change LFO type
-  if (cc === 46 && val > 0) {
-    lfoTypeIndex = (lfoTypeIndex + 1) % lfoTypes.length;
-    select("#lfoType").value(lfoTypes[lfoTypeIndex]);
-    return;
-  }
+  const midiMap = {
+    120: 'depthSlider',
+    121: 'tiltXSlider',
+    122: 'tiltYSlider',
+    123: 'scaleSlider',
+    124: 'densitySlider',
+    125: 'lfoFreq',
+    126: 'lfoAmp',
+    32: 'lfoDepth',
+    33: 'lfoTiltX',
+    34: 'lfoTiltY',
+    35: 'lfoScale'
+  };
 
-  // Faders & Knobs
-  if (cc >= 120 && cc <= 127) {
-    let controls = midiMap[cc];
-    let targetControl = Array.isArray(controls) ? controls[0] : controls;
-    if (targetControl === 'colorPicker') {
-      let hue = Math.floor((val / 127) * 360);
-      let rgb = hsvToRgb(hue / 360, 1, 1);
-      let hex = rgbToHex(rgb[0], rgb[1], rgb[2]);
-      let picker = select("#colorPicker");
-      if (picker) picker.value(hex);
-      return;
-    }
-    let slider = select(`#${targetControl}`);
-    if (slider && slider.elt && slider.elt.type === "range") {
-      let min = Number(slider.elt.min);
-      let max = Number(slider.elt.max);
-      let value;
-      if (
-        targetControl === "depthSlider" ||
-        targetControl === "tiltXSlider" ||
-        targetControl === "tiltYSlider" ||
-        targetControl === "scaleSlider"
-      ) {
-        // Bipolar mapping: center=64
-        let mid = (min + max) / 2;
-        let range = (max - min) / 2;
-        let bipolar = ((val - 64) / 63) * range;
-        value = mid + bipolar;
-      } else {
-        // Unipolar mapping
-        value = min + (val / 127) * (max - min);
-      }
-      let step = slider.elt.step ? Number(slider.elt.step) : 1;
-      if (step >= 1) value = Math.round(value);
-      value = Math.max(min, Math.min(max, value));
-      if (!isNaN(value)) slider.value(value);
-    }
-    return;
-  }
+  let controlId = midiMap[cc];
+  if (!controlId) return;
 
-  // Solo buttons (LFO toggles)
-  if ([32,33,34,35].includes(cc)) {
-    let checkbox = select(`#${midiMap[cc][0]}`);
-    if (checkbox && checkbox.elt && checkbox.elt.type === "checkbox") {
-      if (val > 0) checkbox.elt.checked = !checkbox.elt.checked;
-    }
-    return;
-  }
-}
+  let control = select(`#${controlId}`);
+  if (!control) return;
 
-// --- Color helpers ---
-function hsvToRgb(h, s, v) {
-  let r, g, b;
-  let i = Math.floor(h * 6);
-  let f = h * 6 - i;
-  let p = v * (1 - s);
-  let q = v * (1 - f * s);
-  let t = v * (1 - (1 - f) * s);
-  switch (i % 6) {
-    case 0: r = v, g = t, b = p; break;
-    case 1: r = q, g = v, b = p; break;
-    case 2: r = p, g = v, b = t; break;
-    case 3: r = p, g = q, b = v; break;
-    case 4: r = t, g = p, b = v; break;
-    case 5: r = v, g = p, b = q; break;
+  if (control.elt.type === 'range') {
+    let min = Number(control.elt.min);
+    let max = Number(control.elt.max);
+    let mapped = min + (val / 127) * (max - min);
+    control.value(mapped);
+  } else if (control.elt.type === 'checkbox') {
+    if (val > 0) control.elt.checked = !control.elt.checked;
   }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
-function rgbToHex(r, g, b) {
-  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b)
-    .toString(16)
-    .slice(1)
-    .toUpperCase();
 }
