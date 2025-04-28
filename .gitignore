@@ -1,4 +1,7 @@
-.DS_Store
+
 node_modules/
+rutt-etra-darwin-arm64/
+*.app
+.DS_Store
 *.log
 
