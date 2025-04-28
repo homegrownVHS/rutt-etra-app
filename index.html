@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rutt-Etra Live + MIDI</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+    }
+    #controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+      max-width: 1280px;
+      width: 98vw;
+    }
+    #row1, #row2 {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px;
+      border-radius: 8px;
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      min-width: 150px;
+      max-width: 220px;
+    }
+    label {
+      margin-bottom: 4px;
+    }
+    input[type="range"],
+    select,
+    input[type="color"],
+    input[type="file"] {
+      width: 100%;
+    }
+    input[type="file"] {
+      background: #222;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 4px;
+    }
+    button {
+      background: #333;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 1em;
+      margin-top: 6px;
+    }
+    button:hover {
+      background: #666;
+    }
+  </style>
+</head>
+<body>
+  <main></main>
+
+  <div id="controls">
+    <div id="row1">
+      <div class="control-group">
+        <label for="camSelect">Camera Source</label>
+        <select id="camSelect"></select>
+      </div>
+
+      <div class="control-group">
+        <label>Depth Range <span id="depthLabel">0</span></label>
+        <input type="range" id="depthSlider" min="-300" max="300" value="0">
+        <label><input type="checkbox" id="lfoDepth"> LFO</label>
+      </div>
+
+      <div class="control-group">
+        <label>Tilt Angle X <span id="tiltXLabel">0°</span></label>
+        <input type="range" id="tiltXSlider" min="-180" max="180" value="0">
+        <label><input type="checkbox" id="lfoTiltX"> LFO</label>
+      </div>
+
+      <div class="control-group">
+        <label>Tilt Angle Y <span id="tiltYLabel">0°</span></label>
+        <input type="range" id="tiltYSlider" min="-180" max="180" value="0">
+        <label><input type="checkbox" id="lfoTiltY"> LFO</label>
+      </div>
+
+      <div class="control-group">
+        <label>Scale <span id="scaleLabel">1.00</span></label>
+        <input type="range" id="scaleSlider" min="0.5" max="3" step="0.1" value="1">
+        <label><input type="checkbox" id="lfoScale"> LFO</label>
+      </div>
+
+      <div class="control-group">
+        <label>Density <span id="densityLabel">6</span></label>
+        <input type="range" id="densitySlider" min="2" max="40" value="6">
+      </div>
+
+      <div class="control-group">
+        <label>Line Color</label>
+        <input type="color" id="colorPicker" value="#ffffff">
+      </div>
+    </div>
+
+    <div id="row2">
+      <div class="control-group">
+        <label>LFO Type</label>
+        <select id="lfoType">
+          <option value="saw">Sawtooth</option>
+          <option value="sin">Sine</option>
+          <option value="tri">Triangle</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>LFO Freq</label>
+        <input type="range" id="lfoFreq" min="0.01" max="2" step="0.01" value="0.3">
+      </div>
+
+      <div class="control-group">
+        <label>LFO Amp</label>
+        <input type="range" id="lfoAmp" min="0" max="1" step="0.01" value="0.5">
+      </div>
+
+      <div class="control-group">
+        <label>&nbsp;</label>
+        <button id="resetBtn">Reset Orbit</button>
+      </div>
+
+      <div class="control-group">
+        <label>Upload Image</label>
+        <input type="file" id="imgInput" accept="image/*">
+      </div>
+      <div class="control-group">
+        <label>Upload Video</label>
+        <input type="file" id="vidInput" accept="video/*">
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="sketch.js"></script>
+</body>
+</html>
