@@ -193,7 +193,7 @@ function draw() {
       let r = src.pixels[idx];
       let g = src.pixels[idx + 1];
       let b = src.pixels[idx + 2];
-      let bright = (r + g + b) / (3 * 255); 
+      let bright = (r + g + b) / (3 * 255);
       let z = map(bright, 0, 1, -abs(depth), abs(depth));
       if (depth < 0) z *= -1;
       stroke(r, g, b);
