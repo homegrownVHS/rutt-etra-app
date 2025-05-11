@@ -23,7 +23,7 @@ function setup() {
   startButton.mousePressed(startManualCamera);
 
   videoEl = document.getElementById("cameraFeed");
-  pg = createGraphics(640, 480); // Off-screen canvas to read video pixels
+  pg = createGraphics(640, 480);
   pg.pixelDensity(1);
 }
 
