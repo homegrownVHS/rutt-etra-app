@@ -1,173 +1,60 @@
-let cam, uploadedMedia, uploadedType = null;
+let videoEl;
+let streamReady = false;
+let pg; // Off-screen buffer
+
+let rotX = 30, rotY = 0;
+let targetRotX = 30, targetRotY = 0;
+let scl = 1.0, depth = 100;
 let stepSize = 6;
 
-let depthSlider, tiltXSlider, tiltYSlider, scaleSlider, densitySlider;
-let camSelect, imgInput, vidInput;
-let lfoDepth, lfoTiltX, lfoTiltY, lfoScale, lfoFreqSlider, lfoAmpSlider, lfoTypeSelector;
-
-let streamReady = false;
-let selectedDeviceId = null;
-let controlsHovering = false;
-
-let rotX = 30;
-let rotY = 0;
-let targetRotX = 30;
-let targetRotY = 0;
-
-let lfoPhase = 0;
-let lfoTypes = ['saw', 'sin', 'tri'];
-let lfoTypeIndex = 0;
+let pinchStartDist = null;
+let twoFingerStartY = null;
+let startButton, errorMsg;
 
 function setup() {
-  createCanvas(1280, 720, WEBGL);
-
-  depthSlider = select("#depthSlider");
-  tiltXSlider = select("#tiltXSlider");
-  tiltYSlider = select("#tiltYSlider");
-  scaleSlider = select("#scaleSlider");
-  densitySlider = select("#densitySlider");
-  camSelect = select("#camSelect");
-  imgInput = select("#imgInput");
-  vidInput = select("#vidInput");
-
-  lfoDepth = select("#lfoDepth");
-  lfoTiltX = select("#lfoTiltX");
-  lfoTiltY = select("#lfoTiltY");
-  lfoScale = select("#lfoScale");
-  lfoFreqSlider = select("#lfoFreq");
-  lfoAmpSlider = select("#lfoAmp");
-  lfoTypeSelector = select("#lfoType");
-
-  let controlsDiv = select("#controls");
-  controlsDiv.mouseOver(() => controlsHovering = true);
-  controlsDiv.mouseOut(() => controlsHovering = false);
-
-  imgInput.changed(handleImageUpload);
-  vidInput.changed(handleVideoUpload);
-
-  navigator.mediaDevices.enumerateDevices().then(devices => {
-    const videoDevices = devices.filter(d => d.kind === 'videoinput');
-    videoDevices.forEach((device, i) => {
-      const option = createElement('option', device.label || `Camera ${i + 1}`);
-      option.attribute('value', device.deviceId);
-      camSelect.child(option);
-    });
-    selectedDeviceId = videoDevices[0]?.deviceId;
-    startCam(selectedDeviceId);
-  });
-
-  camSelect.changed(() => {
-    selectedDeviceId = camSelect.value();
-    if (cam) cam.remove();
-    startCam(selectedDeviceId);
-  });
-
-  strokeWeight(1);
+  createCanvas(windowWidth, windowHeight, WEBGL);
   noFill();
+  strokeWeight(1);
 
-  if (navigator.requestMIDIAccess) {
-    navigator.requestMIDIAccess().then(onMIDISuccess);
-  }
+  errorMsg = select("#errorMsg");
+
+  startButton = createButton('Start Camera');
+  startButton.position(20, 20);
+  startButton.mousePressed(startManualCamera);
+
+  videoEl = document.getElementById("cameraFeed");
+  pg = createGraphics(640, 480); // Off-screen canvas to read video pixels
+  pg.pixelDensity(1);
 }
 
-function startCam(deviceId) {
-  uploadedMedia = null;
-  uploadedType = null;
-  navigator.mediaDevices.getUserMedia({
-    video: { deviceId: { exact: deviceId } }
-  }).then(stream => {
-    cam = createCapture({ video: { deviceId: { exact: deviceId } } }, () => {
-      streamReady = true;
+function startManualCamera() {
+  startButton.hide();
+
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+      videoEl.srcObject = stream;
+      videoEl.onloadeddata = () => {
+        streamReady = true;
+      };
+    })
+    .catch(err => {
+      errorMsg.html("Camera error: " + err.message);
+      console.error(err);
     });
-    cam.size(640, 480);  // Force camera to 640x480
-    cam.hide();
-  }).catch(err => {
-    console.error("Camera access error:", err);
-  });
-}
-
-function handleImageUpload() {
-  if (imgInput.elt.files.length > 0) {
-    let file = imgInput.elt.files[0];
-    loadImage(URL.createObjectURL(file), img => {
-      img.resize(640, 480);  // Resize the p5.Image properly
-      uploadedMedia = img;
-      uploadedType = 'image';
-    });
-  }
-}
-
-
-function handleVideoUpload() {
-  if (vidInput.elt.files.length > 0) {
-    let file = vidInput.elt.files[0];
-    let vid = createVideo([URL.createObjectURL(file)], () => {
-      vid.hide();
-      vid.loop();
-      vid.volume(0);
-      vid.size(640, 480); // Resize uploaded video
-      uploadedMedia = vid;
-      uploadedType = 'video';
-    });
-  }
-}
-
-function getLFOValue(type, freq) {
-  lfoPhase += freq * 0.01;
-  if (lfoPhase > 1) lfoPhase -= 1;
-
-  switch (type) {
-    case "saw": return (lfoPhase * 2.0) - 1.0;
-    case "sin": return sin(TWO_PI * lfoPhase);
-    case "tri": return abs((lfoPhase * 4) - 2) - 1;
-    default: return 0;
-  }
-}
-
-function mouseDragged() {
-  if (!controlsHovering) {
-    targetRotY += (movedX * 0.01);
-    targetRotX -= (movedY * 0.01);
-  }
 }
 
 function draw() {
   background(0);
+  if (!streamReady || videoEl.readyState < 2) return;
 
-  let src = null;
-  if (uploadedMedia && uploadedType === 'image') src = uploadedMedia;
-  else if (uploadedMedia && uploadedType === 'video') src = uploadedMedia;
-  else if (cam && streamReady && cam.loadedmetadata) src = cam;
-
-  if (!src) return;
-
-  let baseDepth = Number(depthSlider.value());
-  let baseTiltX = radians(Number(tiltXSlider.value()) + 90);
-  let baseTiltY = radians(Number(tiltYSlider.value()));
-  let baseScale = Number(scaleSlider.value());
-  stepSize = int(densitySlider.value());
-
-  let lfoFreq = Number(lfoFreqSlider.value());
-  let lfoAmp = Number(lfoAmpSlider.value());
-  let lfoType = lfoTypeSelector.value();
-  let lfo = getLFOValue(lfoType, lfoFreq);
-
-  let depth = baseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
-  let tiltX = baseTiltX + (lfoTiltX.checked() ? lfo * PI * lfoAmp : 0);
-  let tiltY = baseTiltY + (lfoTiltY.checked() ? lfo * PI * lfoAmp : 0);
-  let scl = baseScale + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
-
-  select("#depthLabel").html(depth.toFixed(0));
-  select("#tiltXLabel").html((Number(tiltXSlider.value())).toFixed(0) + "°");
-  select("#tiltYLabel").html(tiltYSlider.value() + "°");
-  select("#scaleLabel").html(scl.toFixed(2));
-  select("#densityLabel").html(stepSize);
+  pg.image(videoEl, 0, 0, pg.width, pg.height);
+  pg.loadPixels();
 
   rotX = lerp(rotX, targetRotX, 0.1);
   rotY = lerp(rotY, targetRotY, 0.1);
 
-  let bufferWidth = src.width;
-  let bufferHeight = src.height;
+  let bufferWidth = pg.width;
+  let bufferHeight = pg.height;
   let canvasAspect = width / height;
   let bufferAspect = bufferWidth / bufferHeight;
   let scaleFactor = bufferAspect > canvasAspect
@@ -175,24 +62,18 @@ function draw() {
     : height / bufferHeight;
 
   push();
-  rotateX(rotX + tiltX);
-  rotateY(rotY + tiltY);
+  rotateX(rotX + radians(90));
+  rotateY(rotY);
   scale(scl * scaleFactor);
   translate(-bufferWidth / 2, -bufferHeight / 2);
-
-  src.loadPixels();
-  if (src.pixels.length === 0) {
-    pop();
-    return;
-  }
 
   for (let y = 0; y < bufferHeight; y += stepSize) {
     beginShape();
     for (let x = 0; x < bufferWidth; x += stepSize) {
       let idx = (x + y * bufferWidth) * 4;
-      let r = src.pixels[idx];
-      let g = src.pixels[idx + 1];
-      let b = src.pixels[idx + 2];
+      let r = pg.pixels[idx];
+      let g = pg.pixels[idx + 1];
+      let b = pg.pixels[idx + 2];
       let bright = (r + g + b) / (3 * 255);
       let z = map(bright, 0, 1, -abs(depth), abs(depth));
       if (depth < 0) z *= -1;
@@ -204,40 +85,39 @@ function draw() {
   pop();
 }
 
-function onMIDISuccess(midiAccess) {
-  for (let input of midiAccess.inputs.values()) {
-    input.onmidimessage = handleCustomMIDIMessage;
+function touchMoved() {
+  if (touches.length === 1) {
+    let dx = movedX;
+    let dy = movedY;
+    targetRotY += dx * 0.01;
+    targetRotX -= dy * 0.01;
+  } else if (touches.length === 2) {
+    let d = dist(touches[0].x, touches[0].y, touches[1].x, touches[1].y);
+
+    if (pinchStartDist === null) pinchStartDist = d;
+    else {
+      let zoomDelta = d - pinchStartDist;
+      scl += zoomDelta * 0.001;
+      scl = constrain(scl, 0.5, 3);
+      pinchStartDist = d;
+    }
+
+    let avgY = (touches[0].y + touches[1].y) / 2;
+    if (twoFingerStartY === null) twoFingerStartY = avgY;
+    else {
+      let deltaY = avgY - twoFingerStartY;
+      depth += deltaY * 0.5;
+      depth = constrain(depth, -300, 300);
+      twoFingerStartY = avgY;
+    }
   }
+
+  return false;
 }
 
-function handleCustomMIDIMessage(message) {
-  const [status, cc, val] = message.data;
-  const midiMap = {
-    120: 'depthSlider',
-    121: 'tiltXSlider',
-    122: 'tiltYSlider',
-    123: 'scaleSlider',
-    124: 'densitySlider',
-    125: 'lfoFreq',
-    126: 'lfoAmp',
-    32: 'lfoDepth',
-    33: 'lfoTiltX',
-    34: 'lfoTiltY',
-    35: 'lfoScale'
-  };
-
-  let controlId = midiMap[cc];
-  if (!controlId) return;
-
-  let control = select(`#${controlId}`);
-  if (!control) return;
-
-  if (control.elt.type === 'range') {
-    let min = Number(control.elt.min);
-    let max = Number(control.elt.max);
-    let mapped = min + (val / 127) * (max - min);
-    control.value(mapped);
-  } else if (control.elt.type === 'checkbox') {
-    if (val > 0) control.elt.checked = !control.elt.checked;
+function touchEnded() {
+  if (touches.length < 2) {
+    pinchStartDist = null;
+    twoFingerStartY = null;
   }
 }
