@@ -15,6 +15,7 @@ function setup() {
   createCanvas(windowWidth, windowHeight, WEBGL);
   noFill();
   strokeWeight(1);
+  textFont('monospace');
 
   errorMsg = select("#errorMsg");
 
@@ -33,7 +34,9 @@ function startManualCamera() {
   navigator.mediaDevices.getUserMedia({ video: true })
     .then(stream => {
       videoEl.srcObject = stream;
+
       videoEl.onloadeddata = () => {
+        console.log("videoEl loaded", videoEl.videoWidth, videoEl.videoHeight);
         streamReady = true;
       };
     })
@@ -47,13 +50,23 @@ function draw() {
   background(0);
 
   if (!streamReady || videoEl.readyState < 2) {
+    fill(255, 0, 0);
+    textSize(24);
+    textAlign(CENTER, CENTER);
+    text("Waiting for camera...", 0, 0);
     return;
   }
 
   pg.image(videoEl, 0, 0, pg.width, pg.height);
   pg.loadPixels();
 
-  if (pg.pixels.length === 0) return;
+  if (pg.pixels.length === 0) {
+    fill(255, 255, 0);
+    textSize(20);
+    textAlign(CENTER, CENTER);
+    text("No pixels loaded", 0, 0);
+    return;
+  }
 
   rotX = lerp(rotX, targetRotX, 0.1);
   rotY = lerp(rotY, targetRotY, 0.1);

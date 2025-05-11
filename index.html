@@ -16,7 +16,12 @@
       display: block;
     }
     video#cameraFeed {
-      display: none; /* Keep hidden, just for pixel data */
+      position: absolute;
+      top: 80px;
+      left: 20px;
+      width: 160px;
+      z-index: 5;
+      opacity: 0.01; /* Almost invisible but not "display: none" to avoid iOS quirk */
     }
     button {
       position: absolute;
