@@ -1,56 +1,71 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Rutt-Etra Mobile</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Video Canvas Test</title>
   <style>
-    html, body {
+    body {
       margin: 0;
-      padding: 0;
-      overflow: hidden;
       background: black;
+      overflow: hidden;
       touch-action: none;
     }
     canvas {
       display: block;
     }
-    video#cameraFeed {
+    #videoFeed {
       position: fixed;
       top: 100vh;
       left: 100vw;
       width: 1px;
       height: 1px;
       opacity: 0.01;
-      z-index: -1;
     }
-    button {
+    #startBtn {
       position: absolute;
       top: 20px;
       left: 20px;
-      padding: 10px 16px;
-      font-size: 16px;
-      border: none;
-      border-radius: 4px;
-      background-color: #222;
-      color: white;
-      z-index: 10;
-    }
-    #errorMsg {
-      position: absolute;
-      top: 60px;
-      left: 20px;
-      color: red;
-      font-size: 16px;
-      font-family: monospace;
+      padding: 10px;
       z-index: 10;
     }
   </style>
 </head>
 <body>
-  <video id="cameraFeed" autoplay muted playsinline></video>
-  <div id="errorMsg"></div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
-  <script src="sketch.js"></script>
+  <button id="startBtn">Start Camera</button>
+  <video id="videoFeed" autoplay muted playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const video = document.getElementById("videoFeed");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const startBtn = document.getElementById("startBtn");
+
+    let streaming = false;
+
+    startBtn.onclick = () => {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          video.srcObject = stream;
+          video.onloadeddata = () => {
+            streaming = true;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            drawLoop();
+            startBtn.remove();
+          };
+        })
+        .catch(err => {
+          alert("Camera error: " + err.message);
+        });
+    };
+
+    function drawLoop() {
+      if (streaming) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(drawLoop);
+      }
+    }
+  </script>
 </body>
 </html>
