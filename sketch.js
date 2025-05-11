@@ -1,6 +1,6 @@
 let videoEl;
 let streamReady = false;
-let pg; // Off-screen graphics buffer
+let pg;
 
 let rotX = 30, rotY = 0;
 let targetRotX = 30, targetRotY = 0;
@@ -34,7 +34,6 @@ function startManualCamera() {
     .then(stream => {
       videoEl.srcObject = stream;
       videoEl.onloadeddata = () => {
-        console.log("Video loaded:", videoEl.videoWidth, videoEl.videoHeight);
         streamReady = true;
       };
     })
@@ -48,22 +47,13 @@ function draw() {
   background(0);
 
   if (!streamReady || videoEl.readyState < 2) {
-    fill(255, 0, 0);
-    textSize(24);
-    textAlign(CENTER, CENTER);
-    text("Waiting for camera...", 0, 0);
     return;
   }
 
   pg.image(videoEl, 0, 0, pg.width, pg.height);
   pg.loadPixels();
 
-  if (pg.pixels.length === 0) {
-    fill(255, 255, 0);
-    textSize(20);
-    text("No pixels loaded", 0, 0);
-    return;
-  }
+  if (pg.pixels.length === 0) return;
 
   rotX = lerp(rotX, targetRotX, 0.1);
   rotY = lerp(rotY, targetRotY, 0.1);
