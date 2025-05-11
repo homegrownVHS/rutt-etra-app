@@ -16,12 +16,13 @@
       display: block;
     }
     video#cameraFeed {
-      position: absolute;
-      top: 80px;
-      left: 20px;
-      width: 160px;
-      z-index: 5;
-      opacity: 0.01; /* Almost invisible but not "display: none" to avoid iOS quirk */
+      position: fixed;
+      top: 100vh;
+      left: 100vw;
+      width: 1px;
+      height: 1px;
+      opacity: 0.01;
+      z-index: -1;
     }
     button {
       position: absolute;

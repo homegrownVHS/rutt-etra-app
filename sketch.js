@@ -15,7 +15,6 @@ function setup() {
   createCanvas(windowWidth, windowHeight, WEBGL);
   noFill();
   strokeWeight(1);
-  textFont('monospace');
 
   errorMsg = select("#errorMsg");
 
@@ -36,8 +35,8 @@ function startManualCamera() {
       videoEl.srcObject = stream;
 
       videoEl.onloadeddata = () => {
-        console.log("videoEl loaded", videoEl.videoWidth, videoEl.videoHeight);
         streamReady = true;
+        videoEl.play(); // force play for iOS
       };
     })
     .catch(err => {
@@ -51,7 +50,7 @@ function draw() {
 
   if (!streamReady || videoEl.readyState < 2) {
     fill(255, 0, 0);
-    textSize(24);
+    textSize(20);
     textAlign(CENTER, CENTER);
     text("Waiting for camera...", 0, 0);
     return;
@@ -62,8 +61,6 @@ function draw() {
 
   if (pg.pixels.length === 0) {
     fill(255, 255, 0);
-    textSize(20);
-    textAlign(CENTER, CENTER);
     text("No pixels loaded", 0, 0);
     return;
   }
