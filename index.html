@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Video Canvas Test</title>
+  <title>Video Canvas Touch Test</title>
   <style>
     body {
       margin: 0;
@@ -13,13 +13,14 @@
     canvas {
       display: block;
     }
-    #videoFeed {
+    video#videoFeed {
       position: fixed;
       top: 100vh;
       left: 100vw;
       width: 1px;
       height: 1px;
       opacity: 0.01;
+      z-index: -1;
     }
     #startBtn {
       position: absolute;
@@ -27,6 +28,7 @@
       left: 20px;
       padding: 10px;
       z-index: 10;
+      font-size: 16px;
     }
   </style>
 </head>
@@ -51,6 +53,7 @@
             streaming = true;
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
+            video.play(); // Start playing in case iOS paused it
             drawLoop();
             startBtn.remove();
           };
@@ -62,10 +65,29 @@
 
     function drawLoop() {
       if (streaming) {
+        if (video.paused) video.play(); // 🔄 Force playback for iOS Safari
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         requestAnimationFrame(drawLoop);
       }
     }
+
+    // 🔍 Touch debug: draw green dot or detect pinch
+    canvas.addEventListener("touchmove", e => {
+      e.preventDefault();
+      const t = e.touches;
+      if (t.length === 1) {
+        const x = t[0].clientX;
+        const y = t[0].clientY;
+        ctx.fillStyle = "lime";
+        ctx.beginPath();
+        ctx.arc(x, y, 20, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (t.length === 2) {
+        ctx.fillStyle = "red";
+        ctx.font = "24px monospace";
+        ctx.fillText("Pinch Detected", 30, 30);
+      }
+    }, { passive: false });
   </script>
 </body>
 </html>
