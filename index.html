@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Video Canvas Touch Fixed</title>
+  <title>iOS Video + Touch Test</title>
   <style>
     html, body {
       margin: 0;
@@ -26,9 +26,9 @@
       position: absolute;
       top: 20px;
       left: 20px;
-      padding: 10px;
-      z-index: 10;
+      padding: 10px 16px;
       font-size: 16px;
+      z-index: 10;
     }
   </style>
 </head>
@@ -50,14 +50,24 @@
       navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
           video.srcObject = stream;
-          video.onloadeddata = () => {
+          video.play(); // ✅ Force playback attempt
+
+          const handleStreamReady = () => {
+            if (streaming) return;
             streaming = true;
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            video.play();
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
             drawLoop();
             startBtn.remove();
           };
+
+          video.addEventListener("canplay", handleStreamReady, { once: true });
+          video.addEventListener("loadeddata", handleStreamReady, { once: true });
+
+          // ⏱ fallback in case neither fires
+          setTimeout(() => {
+            if (!streaming) handleStreamReady();
+          }, 2000);
         })
         .catch(err => {
           alert("Camera error: " + err.message);
@@ -67,14 +77,10 @@
     function drawLoop() {
       if (streaming) {
         if (video.paused) video.play();
-
-        // ✅ Clear canvas first
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // ✅ Draw video frame
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // ✅ Draw touches
+        // Draw touch feedback
         for (let t of touches) {
           ctx.beginPath();
           ctx.fillStyle = touches.length === 1 ? "lime" : "red";
@@ -82,7 +88,6 @@
           ctx.fill();
         }
 
-        // ✅ Label pinch
         if (touches.length === 2) {
           ctx.fillStyle = "red";
           ctx.font = "24px monospace";
@@ -93,12 +98,12 @@
       }
     }
 
-    window.addEventListener("touchmove", e => {
+    window.addEventListener("touchstart", e => {
       e.preventDefault();
       touches = [...e.touches];
     }, { passive: false });
 
-    window.addEventListener("touchstart", e => {
+    window.addEventListener("touchmove", e => {
       e.preventDefault();
       touches = [...e.touches];
     }, { passive: false });
