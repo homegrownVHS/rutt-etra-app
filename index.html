@@ -1,42 +1,111 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Touch Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Video Canvas Touch Fixed</title>
   <style>
     html, body {
       margin: 0;
-      padding: 0;
-      background: #000;
-      color: #0f0;
-      font-family: monospace;
-      font-size: 24px;
+      background: black;
+      overflow: hidden;
       touch-action: none;
     }
-    #log {
-      padding: 2em;
+    canvas {
+      display: block;
+    }
+    video#videoFeed {
+      position: fixed;
+      top: 100vh;
+      left: 100vw;
+      width: 1px;
+      height: 1px;
+      opacity: 0.01;
+      z-index: -1;
+    }
+    #startBtn {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      padding: 10px;
+      z-index: 10;
+      font-size: 16px;
     }
   </style>
 </head>
 <body>
-  <div id="log">Touch me.</div>
+  <button id="startBtn">Start Camera</button>
+  <video id="videoFeed" autoplay muted playsinline></video>
+  <canvas id="canvas"></canvas>
 
   <script>
-    const log = document.getElementById("log");
+    const video = document.getElementById("videoFeed");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const startBtn = document.getElementById("startBtn");
 
-    window.addEventListener("touchstart", e => {
-      e.preventDefault();
-      log.innerText = `touchstart: ${e.touches.length} fingers`;
-    }, { passive: false });
+    let streaming = false;
+    let touches = [];
+
+    startBtn.onclick = () => {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          video.srcObject = stream;
+          video.onloadeddata = () => {
+            streaming = true;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            video.play();
+            drawLoop();
+            startBtn.remove();
+          };
+        })
+        .catch(err => {
+          alert("Camera error: " + err.message);
+        });
+    };
+
+    function drawLoop() {
+      if (streaming) {
+        if (video.paused) video.play();
+
+        // ✅ Clear canvas first
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // ✅ Draw video frame
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // ✅ Draw touches
+        for (let t of touches) {
+          ctx.beginPath();
+          ctx.fillStyle = touches.length === 1 ? "lime" : "red";
+          ctx.arc(t.clientX, t.clientY, 25, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // ✅ Label pinch
+        if (touches.length === 2) {
+          ctx.fillStyle = "red";
+          ctx.font = "24px monospace";
+          ctx.fillText("Pinch Detected", 30, 30);
+        }
+
+        requestAnimationFrame(drawLoop);
+      }
+    }
 
     window.addEventListener("touchmove", e => {
       e.preventDefault();
-      log.innerText = `touchmove: ${e.touches.length} fingers`;
+      touches = [...e.touches];
+    }, { passive: false });
+
+    window.addEventListener("touchstart", e => {
+      e.preventDefault();
+      touches = [...e.touches];
     }, { passive: false });
 
     window.addEventListener("touchend", e => {
       e.preventDefault();
-      log.innerText = `touchend`;
+      touches = [...e.touches];
     }, { passive: false });
   </script>
 </body>
