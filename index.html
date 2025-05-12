@@ -53,7 +53,7 @@
             streaming = true;
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            video.play(); // Start playing in case iOS paused it
+            video.play();
             drawLoop();
             startBtn.remove();
           };
@@ -65,16 +65,17 @@
 
     function drawLoop() {
       if (streaming) {
-        if (video.paused) video.play(); // 🔄 Force playback for iOS Safari
+        if (video.paused) video.play();
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         requestAnimationFrame(drawLoop);
       }
     }
 
-    // 🔍 Touch debug: draw green dot or detect pinch
-    canvas.addEventListener("touchmove", e => {
+    // ✅ Works on iOS: bind to window instead of canvas
+    window.addEventListener("touchmove", e => {
       e.preventDefault();
       const t = e.touches;
+
       if (t.length === 1) {
         const x = t[0].clientX;
         const y = t[0].clientY;
