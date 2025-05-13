@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rutt-Etra Depth-Color Mesh</title>
+  <title>Enhanced Rutt-Etra Mesh</title>
   <style>
     html, body {
       margin: 0;
@@ -117,22 +117,24 @@
         video.srcObject = stream;
 
         video.addEventListener("loadeddata", () => {
-          log.textContent = "Touch mesh ready";
+          log.textContent = "Enhanced mesh ready";
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
 
           function drawLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixels = frame.data;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height); // remove original image from view
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.lineWidth = 0.8;
+            ctx.shadowBlur = 4;
 
             for (let y = 0; y < canvas.height; y += step) {
-              const gradient = ctx.createLinearGradient(0, y, canvas.width, y);
-              const points = [];
+              ctx.beginPath();
+              let first = true;
 
               for (let x = 0; x < canvas.width; x += step) {
                 const i = (x + y * canvas.width) * 4;
@@ -141,19 +143,20 @@
                 const z = (bright - 0.5) * 2 * zScale;
 
                 const [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
-                points.push([px + canvas.width / 2, py + canvas.height / 2]);
+                const sx = px + canvas.width / 2;
+                const sy = py + canvas.height / 2;
 
-                const depthNorm = (z + 300) / 600; // map -300..300 → 0..1
-                const hue = 240 - depthNorm * 240; // 240 (blue) → 0 (red)
-                gradient.addColorStop(x / canvas.width, `hsl(${hue}, 80%, 60%)`);
+                ctx.strokeStyle = `rgba(${r},${g},${b}, 0.7)`;
+                ctx.shadowColor = ctx.strokeStyle;
+
+                if (first) {
+                  ctx.moveTo(sx, sy);
+                  first = false;
+                } else {
+                  ctx.lineTo(sx, sy);
+                }
               }
 
-              ctx.beginPath();
-              ctx.strokeStyle = gradient;
-              ctx.moveTo(points[0][0], points[0][1]);
-              for (let i = 1; i < points.length; i++) {
-                ctx.lineTo(points[i][0], points[i][1]);
-              }
               ctx.stroke();
             }
 
