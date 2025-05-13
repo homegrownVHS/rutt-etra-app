@@ -54,7 +54,7 @@
     let rotX = 0;
     let rotY = 0;
     let scale = 1;
-    let zScale = 80;  // can now go negative
+    let zScale = 80; // now allows positive & negative displacement
     let lastTouches = [];
 
     const step = 6;
@@ -101,7 +101,7 @@
           scale *= newDist / prevDist;
         } else {
           zScale += (prevY - newY) * 0.5;
-          zScale = Math.max(-300, Math.min(zScale, 300)); // allow inversion
+          zScale = Math.max(-300, Math.min(zScale, 300));
         }
       }
 
@@ -138,7 +138,9 @@
                 const i = (x + y * canvas.width) * 4;
                 const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
                 const bright = (r + g + b) / 3 / 255;
-                const z = (1 - bright) * zScale;
+
+                // ✅ Displacement centered around brightness = 0.5
+                const z = (bright - 0.5) * 2 * zScale;
 
                 const [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
                 points.push([px + canvas.width / 2, py + canvas.height / 2]);
