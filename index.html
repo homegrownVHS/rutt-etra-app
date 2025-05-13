@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rutt-Etra Enhanced Mesh</title>
+  <title>Rutt-Etra Projected Color Mesh</title>
   <style>
     html, body {
       margin: 0;
@@ -19,13 +19,10 @@
     }
     #videoFeed {
       position: absolute;
-      top: 0;
-      left: 0;
       width: 1px;
       height: 1px;
       opacity: 0.01;
       pointer-events: none;
-      z-index: -1;
     }
     #log {
       position: absolute;
@@ -33,17 +30,15 @@
       left: 0;
       color: white;
       font-family: monospace;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 6px;
-      z-index: 100;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 4px;
     }
   </style>
 </head>
 <body>
-
   <canvas id="canvas"></canvas>
   <video id="videoFeed" autoplay muted playsinline></video>
-  <div id="log">Waiting for camera...</div>
+  <div id="log">Loading...</div>
 
   <script>
     const canvas = document.getElementById("canvas");
@@ -51,12 +46,8 @@
     const video = document.getElementById("videoFeed");
     const log = document.getElementById("log");
 
-    let rotX = 0;
-    let rotY = 0;
-    let scale = 1;
-    let zScale = 80;
+    let rotX = 0, rotY = 0, scale = 1, zScale = 80;
     let lastTouches = [];
-
     const step = 6;
 
     function rotatePoint(x, y, z) {
@@ -72,93 +63,76 @@
       return [dx * scale, dy * scale];
     }
 
-    window.addEventListener("touchstart", e => {
-      lastTouches = [...e.touches];
-    });
+    function getColorAt(pixels, x, y, width, height) {
+      x = Math.round(x);
+      y = Math.round(y);
+      if (x < 0 || y < 0 || x >= width || y >= height) return [0, 0, 0];
+      const i = (x + y * width) * 4;
+      return [pixels[i], pixels[i + 1], pixels[i + 2]];
+    }
 
+    window.addEventListener("touchstart", e => { lastTouches = [...e.touches]; });
+    window.addEventListener("touchend", e => { lastTouches = [...e.touches]; });
     window.addEventListener("touchmove", e => {
       e.preventDefault();
       const t = [...e.touches];
-
       if (t.length === 1 && lastTouches.length === 1) {
-        const dx = t[0].clientX - lastTouches[0].clientX;
-        const dy = t[0].clientY - lastTouches[0].clientY;
-        rotY += dx * 0.005;
-        rotX -= dy * 0.005;
-      }
-
-      if (t.length === 2 && lastTouches.length === 2) {
-        const dist = d => Math.hypot(d[0].clientX - d[1].clientX, d[0].clientY - d[1].clientY);
+        rotY += (t[0].clientX - lastTouches[0].clientX) * 0.005;
+        rotX -= (t[0].clientY - lastTouches[0].clientY) * 0.005;
+      } else if (t.length === 2 && lastTouches.length === 2) {
         const avgY = d => (d[0].clientY + d[1].clientY) / 2;
-
-        const prevDist = dist(lastTouches);
-        const newDist = dist(t);
-        const pinchDelta = Math.abs(newDist - prevDist);
-        const prevY = avgY(lastTouches);
-        const newY = avgY(t);
-
-        if (pinchDelta > 2) {
-          scale *= newDist / prevDist;
-        } else {
-          zScale += (prevY - newY) * 0.5;
-          zScale = Math.max(-300, Math.min(zScale, 300));
-        }
+        const dist = d => Math.hypot(d[0].clientX - d[1].clientX, d[0].clientY - d[1].clientY);
+        const dy = avgY(t) - avgY(lastTouches);
+        const dz = dist(t) - dist(lastTouches);
+        zScale += -dy * 0.5;
+        scale *= 1 + dz * 0.002;
+        zScale = Math.max(-300, Math.min(zScale, 300));
       }
-
       lastTouches = t;
     }, { passive: false });
-
-    window.addEventListener("touchend", e => {
-      lastTouches = [...e.touches];
-    });
 
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => {
         video.srcObject = stream;
-
         video.addEventListener("loadeddata", () => {
-          log.textContent = "Enhanced mesh ready";
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
+          log.textContent = "Touch mesh ready";
 
           function drawLoop() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
             const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixels = frame.data;
+            const w = canvas.width, h = canvas.height;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+            ctx.clearRect(0, 0, w, h);
             ctx.lineWidth = 0.8;
-            ctx.globalAlpha = 0.7;
+            ctx.globalAlpha = 0.75;
             ctx.shadowBlur = 4;
 
-            for (let y = 0; y < canvas.height; y += step) {
-              const gradient = ctx.createLinearGradient(0, y, canvas.width, y);
-              const points = [];
-
-              for (let x = 0; x < canvas.width; x += step) {
-                const i = (x + y * canvas.width) * 4;
+            for (let y = 0; y < h; y += step) {
+              ctx.beginPath();
+              let first = true;
+              for (let x = 0; x < w; x += step) {
+                const i = (x + y * w) * 4;
                 const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
                 const bright = (r + g + b) / 3 / 255;
                 const z = (bright - 0.5) * 2 * zScale;
 
-                const [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
-                const sx = px + canvas.width / 2;
-                const sy = py + canvas.height / 2;
+                const [px, py] = rotatePoint(x - w / 2, y - h / 2, -z);
+                const sx = px + w / 2;
+                const sy = py + h / 2;
 
-                points.push([sx, sy]);
-                gradient.addColorStop(x / canvas.width, `rgb(${r},${g},${b})`);
-              }
+                const [sr, sg, sb] = getColorAt(pixels, sx, sy, w, h);
+                ctx.strokeStyle = `rgba(${sr},${sg},${sb},0.8)`;
+                ctx.shadowColor = ctx.strokeStyle;
 
-              ctx.strokeStyle = gradient;
-              ctx.shadowColor = gradient;
-
-              ctx.beginPath();
-              ctx.moveTo(points[0][0], points[0][1]);
-              for (let i = 1; i < points.length; i++) {
-                ctx.lineTo(points[i][0], points[i][1]);
+                if (first) {
+                  ctx.moveTo(sx, sy);
+                  first = false;
+                } else {
+                  ctx.lineTo(sx, sy);
+                }
               }
               ctx.stroke();
             }
@@ -174,6 +148,5 @@
         console.error(err);
       });
   </script>
-
 </body>
 </html>
