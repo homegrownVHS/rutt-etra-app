@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Canvas Draw Test</title>
+  <title>Canvas Video Brightness Test</title>
   <style>
     html, body {
       margin: 0;
@@ -53,11 +53,27 @@
             if (video.readyState >= 2) {
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-              // ✅ Frame counter overlay
-              ctx.fillStyle = "rgba(0,255,0,0.5)";
+              // Brightness boost
+              let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              let data = imageData.data;
+              for (let i = 0; i < data.length; i += 4) {
+                data[i] = Math.min(255, data[i] * 1.5);     // R
+                data[i+1] = Math.min(255, data[i+1] * 1.5); // G
+                data[i+2] = Math.min(255, data[i+2] * 1.5); // B
+              }
+              ctx.putImageData(imageData, 0, 0);
+
+              // Draw white border
+              ctx.strokeStyle = "white";
+              ctx.lineWidth = 4;
+              ctx.strokeRect(0, 0, canvas.width, canvas.height);
+
+              // Frame counter
+              ctx.fillStyle = "lime";
               ctx.font = "20px monospace";
               ctx.fillText("Frame " + frameCount++, 10, 30);
             }
+
             requestAnimationFrame(drawLoop);
           }
 
