@@ -2,71 +2,72 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Camera Diagnostic</title>
+  <title>Canvas Draw Test</title>
   <style>
     html, body {
       margin: 0;
       background: black;
       color: white;
       font-family: monospace;
-      touch-action: none;
       text-align: center;
+      touch-action: none;
     }
     video {
-      width: 100vw;
-      max-height: 60vh;
-      background: #222;
+      display: none;
     }
-    button {
-      margin: 1em;
-      padding: 1em 2em;
-      font-size: 18px;
+    canvas {
+      display: block;
+      width: 100vw;
+      height: auto;
     }
     #log {
       margin-top: 1em;
-      padding: 0 1em;
-      white-space: pre-wrap;
     }
   </style>
 </head>
 <body>
 
-  <h1>Camera Diagnostic</h1>
-  <button id="startBtn">Start Camera</button>
+  <h1>Canvas + Camera Test</h1>
   <video id="videoFeed" autoplay muted playsinline></video>
-  <div id="log">Waiting...</div>
+  <canvas id="canvas"></canvas>
+  <div id="log">Waiting for video...</div>
 
   <script>
-    const btn = document.getElementById("startBtn");
     const video = document.getElementById("videoFeed");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
     const log = document.getElementById("log");
 
-    function logStatus(msg) {
-      console.log(msg);
-      log.textContent = msg;
-    }
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        video.srcObject = stream;
+        video.onloadeddata = () => {
+          log.textContent = "Video loaded. Starting canvas draw...";
 
-    btn.onclick = () => {
-      logStatus("Pressed Start Camera");
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
 
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        logStatus("getUserMedia not supported in this browser.");
-        return;
-      }
+          let frameCount = 0;
 
-      logStatus("Requesting camera access...");
+          function drawLoop() {
+            if (video.readyState >= 2) {
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      navigator.mediaDevices.getUserMedia({ video: true })
-        .then(stream => {
-          logStatus("Camera access granted. Playing stream...");
-          video.srcObject = stream;
-          video.play();
-        })
-        .catch(err => {
-          logStatus("Camera error: " + err.message);
-          console.error("getUserMedia error:", err);
-        });
-    };
+              // ✅ Frame counter overlay
+              ctx.fillStyle = "rgba(0,255,0,0.5)";
+              ctx.font = "20px monospace";
+              ctx.fillText("Frame " + frameCount++, 10, 30);
+            }
+            requestAnimationFrame(drawLoop);
+          }
+
+          drawLoop();
+        };
+      })
+      .catch(err => {
+        log.textContent = "Camera error: " + err.message;
+        console.error(err);
+      });
   </script>
 
 </body>
