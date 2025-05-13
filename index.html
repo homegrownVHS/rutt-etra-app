@@ -54,7 +54,7 @@
     let rotX = 0;
     let rotY = 0;
     let scale = 1;
-    let zScale = 80;
+    let zScale = 80;  // can now go negative
     let lastTouches = [];
 
     const step = 6;
@@ -101,7 +101,7 @@
           scale *= newDist / prevDist;
         } else {
           zScale += (prevY - newY) * 0.5;
-          zScale = Math.max(10, Math.min(zScale, 300));
+          zScale = Math.max(-300, Math.min(zScale, 300)); // allow inversion
         }
       }
 
