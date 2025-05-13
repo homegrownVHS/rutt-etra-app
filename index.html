@@ -94,24 +94,7 @@
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
 
-          // Double tap to toggle camera
-          canvas.addEventListener('touchend', async (e) => {
-            const now = Date.now();
-            if (now - lastTapTime < 300) {
-              if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-              }
-              currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
-              try {
-                const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode } });
-                video.srcObject = newStream;
-              } catch (err) {
-                console.error("Camera switch error:", err);
-              }
-            }
-            lastTapTime = now;
-          });
-
+          
           canvas.height = video.videoHeight;
           log.textContent = "Touch mesh ready";
           setTimeout(() => log.style.display = 'none', 5000);
