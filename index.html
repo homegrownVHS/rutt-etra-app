@@ -54,7 +54,7 @@
     let rotX = 0;
     let rotY = 0;
     let scale = 1;
-    let zScale = 80; // now allows positive & negative displacement
+    let zScale = 80;
     let lastTouches = [];
 
     const step = 6;
@@ -123,12 +123,14 @@
 
           function drawLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Removed: ctx.drawImage(video, ...)
 
+            // Still load pixel data for line color
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixels = frame.data;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // remove base frame from view
 
             for (let y = 0; y < canvas.height; y += step) {
               const gradient = ctx.createLinearGradient(0, y, canvas.width, y);
@@ -138,8 +140,6 @@
                 const i = (x + y * canvas.width) * 4;
                 const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
                 const bright = (r + g + b) / 3 / 255;
-
-                // ✅ Displacement centered around brightness = 0.5
                 const z = (bright - 0.5) * 2 * zScale;
 
                 const [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
