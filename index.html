@@ -63,14 +63,6 @@
       return [dx * scale, dy * scale];
     }
 
-    function getColorAt(pixels, x, y, width, height) {
-      x = Math.round(x);
-      y = Math.round(y);
-      if (x < 0 || y < 0 || x >= width || y >= height) return [0, 0, 0];
-      const i = (x + y * width) * 4;
-      return [pixels[i], pixels[i + 1], pixels[i + 2]];
-    }
-
     window.addEventListener("touchstart", e => { lastTouches = [...e.touches]; });
     window.addEventListener("touchend", e => { lastTouches = [...e.touches]; });
     window.addEventListener("touchmove", e => {
@@ -111,7 +103,9 @@
             ctx.shadowBlur = 4;
 
             for (let y = 0; y < h; y += step) {
-              let prev = null;
+              const gradient = ctx.createLinearGradient(0, y, w, y);
+              const points = [];
+
               for (let x = 0; x < w; x += step) {
                 const i = (x + y * w) * 4;
                 const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
@@ -122,19 +116,18 @@
                 const sx = px + w / 2;
                 const sy = py + h / 2;
 
-                const [sr, sg, sb] = getColorAt(pixels, sx, sy, w, h);
-
-                if (prev) {
-                  ctx.beginPath();
-                  ctx.moveTo(prev[0], prev[1]);
-                  ctx.lineTo(sx, sy);
-                  ctx.strokeStyle = `rgba(${sr},${sg},${sb},0.8)`;
-                  ctx.shadowColor = ctx.strokeStyle;
-                  ctx.stroke();
-                }
-
-                prev = [sx, sy];
+                points.push([sx, sy]);
+                gradient.addColorStop(x / w, `rgba(${r},${g},${b},0.8)`);
               }
+
+              ctx.strokeStyle = gradient;
+              ctx.shadowColor = gradient;
+              ctx.beginPath();
+              ctx.moveTo(points[0][0], points[0][1]);
+              for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i][0], points[i][1]);
+              }
+              ctx.stroke();
             }
 
             requestAnimationFrame(drawLoop);
