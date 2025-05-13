@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rutt-Etra Touch Mesh</title>
@@ -19,7 +19,14 @@
       display: block;
     }
     #videoFeed {
-      display: none; /* MUST stay in DOM for iOS drawImage() to work */
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0.01;
+      pointer-events: none;
+      z-index: -1;
     }
     #log {
       position: absolute;
