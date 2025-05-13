@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rutt-Etra Touch Control</title>
+  <title>Rutt-Etra Touch Mesh</title>
   <style>
     html, body {
       margin: 0;
@@ -10,15 +10,13 @@
       overflow: hidden;
       touch-action: none;
     }
-    #videoFeed, #canvas {
+    canvas {
       position: absolute;
       top: 0;
       left: 0;
       width: 100vw;
       height: 100vh;
-    }
-    #canvas {
-      pointer-events: none;
+      display: block;
     }
     #log {
       position: absolute;
@@ -34,8 +32,8 @@
 </head>
 <body>
 
-  <video id="videoFeed" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
+  <video id="videoFeed" autoplay muted playsinline style="display: none;"></video>
   <div id="log">Waiting for camera...</div>
 
   <script>
@@ -48,53 +46,10 @@
     let rotY = 0;
     let scale = 1;
     let zScale = 80;
-
     let lastTouches = [];
 
     const step = 6;
 
-    // Touch handlers
-    window.addEventListener("touchstart", e => {
-      lastTouches = [...e.touches];
-    });
-
-    window.addEventListener("touchmove", e => {
-      e.preventDefault();
-      const t = [...e.touches];
-
-      if (t.length === 1 && lastTouches.length === 1) {
-        // Single finger rotate
-        const dx = t[0].clientX - lastTouches[0].clientX;
-        const dy = t[0].clientY - lastTouches[0].clientY;
-        rotY += dx * 0.005;
-        rotX -= dy * 0.005;
-      }
-
-      if (t.length === 2 && lastTouches.length === 2) {
-        const dist = d => Math.hypot(d[0].clientX - d[1].clientX, d[0].clientY - d[1].clientY);
-        const avgY = d => (d[0].clientY + d[1].clientY) / 2;
-
-        const prevDist = dist(lastTouches);
-        const newDist = dist(t);
-        const prevY = avgY(lastTouches);
-        const newY = avgY(t);
-
-        // Pinch to zoom
-        scale *= newDist / prevDist;
-
-        // Up/down two-finger move to change depth
-        zScale += (prevY - newY) * 0.5;
-        zScale = Math.max(10, Math.min(zScale, 300));
-      }
-
-      lastTouches = t;
-    }, { passive: false });
-
-    window.addEventListener("touchend", e => {
-      lastTouches = [...e.touches];
-    });
-
-    // Rotation function
     function rotatePoint(x, y, z) {
       const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
       const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
@@ -108,12 +63,53 @@
       return [dx * scale, dy * scale, dz * scale];
     }
 
+    // Touch controls
+    window.addEventListener("touchstart", e => {
+      lastTouches = [...e.touches];
+    });
+
+    window.addEventListener("touchmove", e => {
+      e.preventDefault();
+      const t = [...e.touches];
+
+      if (t.length === 1 && lastTouches.length === 1) {
+        const dx = t[0].clientX - lastTouches[0].clientX;
+        const dy = t[0].clientY - lastTouches[0].clientY;
+        rotY += dx * 0.005;
+        rotX -= dy * 0.005;
+      }
+
+      if (t.length === 2 && lastTouches.length === 2) {
+        const dist = d => Math.hypot(d[0].clientX - d[1].clientX, d[0].clientY - d[1].clientY);
+        const avgY = d => (d[0].clientY + d[1].clientY) / 2;
+
+        const prevDist = dist(lastTouches);
+        const newDist = dist(t);
+        const pinchDelta = Math.abs(newDist - prevDist);
+        const prevY = avgY(lastTouches);
+        const newY = avgY(t);
+
+        if (pinchDelta > 2) {
+          scale *= newDist / prevDist;
+        } else {
+          zScale += (prevY - newY) * 0.5;
+          zScale = Math.max(10, Math.min(zScale, 300));
+        }
+      }
+
+      lastTouches = t;
+    }, { passive: false });
+
+    window.addEventListener("touchend", e => {
+      lastTouches = [...e.touches];
+    });
+
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => {
         video.srcObject = stream;
 
         video.addEventListener("loadeddata", () => {
-          log.textContent = "Live mesh + touch controls";
+          log.textContent = "Touch mesh ready";
 
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -135,7 +131,7 @@
                 const bright = (r + g + b) / 3 / 255;
                 const z = (1 - bright) * zScale;
 
-                let [px, py, pz] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
+                let [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
                 ctx.strokeStyle = `rgb(${r},${g},${b})`;
                 ctx.lineTo(px + canvas.width / 2, py + canvas.height / 2);
               }
