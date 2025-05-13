@@ -111,8 +111,7 @@
             ctx.shadowBlur = 4;
 
             for (let y = 0; y < h; y += step) {
-              ctx.beginPath();
-              let first = true;
+              let prev = null;
               for (let x = 0; x < w; x += step) {
                 const i = (x + y * w) * 4;
                 const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
@@ -124,17 +123,18 @@
                 const sy = py + h / 2;
 
                 const [sr, sg, sb] = getColorAt(pixels, sx, sy, w, h);
-                ctx.strokeStyle = `rgba(${sr},${sg},${sb},0.8)`;
-                ctx.shadowColor = ctx.strokeStyle;
 
-                if (first) {
-                  ctx.moveTo(sx, sy);
-                  first = false;
-                } else {
+                if (prev) {
+                  ctx.beginPath();
+                  ctx.moveTo(prev[0], prev[1]);
                   ctx.lineTo(sx, sy);
+                  ctx.strokeStyle = `rgba(${sr},${sg},${sb},0.8)`;
+                  ctx.shadowColor = ctx.strokeStyle;
+                  ctx.stroke();
                 }
+
+                prev = [sx, sy];
               }
-              ctx.stroke();
             }
 
             requestAnimationFrame(drawLoop);
