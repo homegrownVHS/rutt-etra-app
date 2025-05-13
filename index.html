@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rutt-Etra Touch Mesh</title>
+  <title>Rutt-Etra Depth-Color Mesh</title>
   <style>
     html, body {
       margin: 0;
@@ -123,14 +123,12 @@
 
           function drawLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            // Removed: ctx.drawImage(video, ...)
 
-            // Still load pixel data for line color
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixels = frame.data;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height); // remove base frame from view
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // remove original image from view
 
             for (let y = 0; y < canvas.height; y += step) {
               const gradient = ctx.createLinearGradient(0, y, canvas.width, y);
@@ -144,7 +142,10 @@
 
                 const [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
                 points.push([px + canvas.width / 2, py + canvas.height / 2]);
-                gradient.addColorStop(x / canvas.width, `rgb(${r},${g},${b})`);
+
+                const depthNorm = (z + 300) / 600; // map -300..300 → 0..1
+                const hue = 240 - depthNorm * 240; // 240 (blue) → 0 (red)
+                gradient.addColorStop(x / canvas.width, `hsl(${hue}, 80%, 60%)`);
               }
 
               ctx.beginPath();
