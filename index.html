@@ -2,35 +2,46 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Canvas Video Brightness Test</title>
+  <title>Video Stream Diagnostic</title>
   <style>
     html, body {
       margin: 0;
+      padding: 0;
       background: black;
-      color: white;
       font-family: monospace;
+      color: white;
       text-align: center;
       touch-action: none;
     }
     video {
-      display: none;
-    }
-    canvas {
-      display: block;
       width: 100vw;
       height: auto;
+      z-index: 1;
+      position: relative;
+    }
+    canvas {
+      display: none; /* optional: test canvas later */
     }
     #log {
-      margin-top: 1em;
+      padding: 1em;
+      background: #111;
+      font-size: 14px;
+    }
+    button {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 10px;
+      z-index: 100;
     }
   </style>
 </head>
 <body>
 
-  <h1>Canvas + Camera Test</h1>
+  <h1>Live Video Feed Test</h1>
   <video id="videoFeed" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
-  <div id="log">Waiting for video...</div>
+  <div id="log">Waiting for camera...</div>
 
   <script>
     const video = document.getElementById("videoFeed");
@@ -41,8 +52,10 @@
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => {
         video.srcObject = stream;
-        video.onloadeddata = () => {
-          log.textContent = "Video loaded. Starting canvas draw...";
+        video.play();
+
+        video.addEventListener("loadeddata", () => {
+          log.innerText = "Camera started. Live feed should be visible above.";
 
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -50,38 +63,21 @@
           let frameCount = 0;
 
           function drawLoop() {
-            if (video.readyState >= 2) {
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-              // Brightness boost
-              let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              let data = imageData.data;
-              for (let i = 0; i < data.length; i += 4) {
-                data[i] = Math.min(255, data[i] * 1.5);     // R
-                data[i+1] = Math.min(255, data[i+1] * 1.5); // G
-                data[i+2] = Math.min(255, data[i+2] * 1.5); // B
-              }
-              ctx.putImageData(imageData, 0, 0);
-
-              // Draw white border
-              ctx.strokeStyle = "white";
-              ctx.lineWidth = 4;
-              ctx.strokeRect(0, 0, canvas.width, canvas.height);
-
-              // Frame counter
-              ctx.fillStyle = "lime";
-              ctx.font = "20px monospace";
-              ctx.fillText("Frame " + frameCount++, 10, 30);
-            }
-
+            // This will run even if canvas is hidden
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "lime";
+            ctx.font = "20px monospace";
+            ctx.fillText("Frame " + frameCount++, 10, 30);
+            console.log("Canvas draw frame:", frameCount);
             requestAnimationFrame(drawLoop);
           }
 
-          drawLoop();
-        };
+          // Optional: run canvas test too
+          // drawLoop();
+        });
       })
       .catch(err => {
-        log.textContent = "Camera error: " + err.message;
+        log.innerText = "Camera error: " + err.message;
         console.error(err);
       });
   </script>
