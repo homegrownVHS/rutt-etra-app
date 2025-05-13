@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Line Mesh Over Video</title>
+  <title>Rutt-Etra Touch Control</title>
   <style>
     html, body {
       margin: 0;
@@ -44,56 +44,97 @@
     const ctx = canvas.getContext("2d");
     const log = document.getElementById("log");
 
-    const step = 6;     // Pixel sampling interval
-    const zScale = 80;  // Brightness → depth
+    let rotX = 0;
+    let rotY = 0;
+    let scale = 1;
+    let zScale = 80;
+
+    let lastTouches = [];
+
+    const step = 6;
+
+    // Touch handlers
+    window.addEventListener("touchstart", e => {
+      lastTouches = [...e.touches];
+    });
+
+    window.addEventListener("touchmove", e => {
+      e.preventDefault();
+      const t = [...e.touches];
+
+      if (t.length === 1 && lastTouches.length === 1) {
+        // Single finger rotate
+        const dx = t[0].clientX - lastTouches[0].clientX;
+        const dy = t[0].clientY - lastTouches[0].clientY;
+        rotY += dx * 0.005;
+        rotX -= dy * 0.005;
+      }
+
+      if (t.length === 2 && lastTouches.length === 2) {
+        const dist = d => Math.hypot(d[0].clientX - d[1].clientX, d[0].clientY - d[1].clientY);
+        const avgY = d => (d[0].clientY + d[1].clientY) / 2;
+
+        const prevDist = dist(lastTouches);
+        const newDist = dist(t);
+        const prevY = avgY(lastTouches);
+        const newY = avgY(t);
+
+        // Pinch to zoom
+        scale *= newDist / prevDist;
+
+        // Up/down two-finger move to change depth
+        zScale += (prevY - newY) * 0.5;
+        zScale = Math.max(10, Math.min(zScale, 300));
+      }
+
+      lastTouches = t;
+    }, { passive: false });
+
+    window.addEventListener("touchend", e => {
+      lastTouches = [...e.touches];
+    });
+
+    // Rotation function
+    function rotatePoint(x, y, z) {
+      const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+      const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+
+      let dy = y * cosX - z * sinX;
+      let dz = y * sinX + z * cosX;
+
+      let dx = x * cosY + dz * sinY;
+      dz = -x * sinY + dz * cosY;
+
+      return [dx * scale, dy * scale, dz * scale];
+    }
 
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => {
         video.srcObject = stream;
 
         video.addEventListener("loadeddata", () => {
-          log.textContent = "Drawing line mesh...";
+          log.textContent = "Live mesh + touch controls";
 
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
 
           function drawLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Draw video to offscreen canvas to access pixels
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
             const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixels = frame.data;
 
-            // Clear canvas for drawing
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.lineWidth = 1;
 
             for (let y = 0; y < canvas.height; y += step) {
               ctx.beginPath();
               for (let x = 0; x < canvas.width; x += step) {
                 const i = (x + y * canvas.width) * 4;
-                const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
-                const brightness = (r + g + b) / 3 / 255;
-                const z = (1 - brightness) * zScale;
+                const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
+                const bright = (r + g + b) / 3 / 255;
+                const z = (1 - bright) * zScale;
 
+                let [px, py, pz] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
                 ctx.strokeStyle = `rgb(${r},${g},${b})`;
-                ctx.lineTo(x, y - z);
-              }
-              ctx.stroke();
-            }
-
-            requestAnimationFrame(drawLoop);
-          }
-
-          drawLoop();
-        });
-      })
-      .catch(err => {
-        log.textContent = "Camera error: " + err.message;
-        console.error(err);
-      });
-  </script>
-
-</body>
-</html>
+                ctx.lineTo(px + canvas.width / 2, py + canvas
