@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>iOS Video + Touch Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rutt-Etra Touch Diagnostic</title>
   <style>
     html, body {
       margin: 0;
@@ -13,7 +13,7 @@
     canvas {
       display: block;
     }
-    video#videoFeed {
+    video {
       position: fixed;
       top: 100vh;
       left: 100vw;
@@ -26,13 +26,14 @@
       position: absolute;
       top: 20px;
       left: 20px;
-      padding: 10px 16px;
+      padding: 10px;
       font-size: 16px;
       z-index: 10;
     }
   </style>
 </head>
 <body>
+
   <button id="startBtn">Start Camera</button>
   <video id="videoFeed" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
@@ -50,9 +51,9 @@
       navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
           video.srcObject = stream;
-          video.play(); // ✅ Force playback attempt
+          video.play();
 
-          const handleStreamReady = () => {
+          const onReady = () => {
             if (streaming) return;
             streaming = true;
             canvas.width = video.videoWidth || 640;
@@ -61,13 +62,8 @@
             startBtn.remove();
           };
 
-          video.addEventListener("canplay", handleStreamReady, { once: true });
-          video.addEventListener("loadeddata", handleStreamReady, { once: true });
-
-          // ⏱ fallback in case neither fires
-          setTimeout(() => {
-            if (!streaming) handleStreamReady();
-          }, 2000);
+          video.addEventListener("canplay", onReady, { once: true });
+          setTimeout(onReady, 2000); // fallback
         })
         .catch(err => {
           alert("Camera error: " + err.message);
@@ -75,27 +71,27 @@
     };
 
     function drawLoop() {
-      if (streaming) {
-        if (video.paused) video.play();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      if (video.paused) video.play();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // Draw touch feedback
-        for (let t of touches) {
-          ctx.beginPath();
-          ctx.fillStyle = touches.length === 1 ? "lime" : "red";
-          ctx.arc(t.clientX, t.clientY, 25, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        if (touches.length === 2) {
-          ctx.fillStyle = "red";
-          ctx.font = "24px monospace";
-          ctx.fillText("Pinch Detected", 30, 30);
-        }
-
-        requestAnimationFrame(drawLoop);
+      const rect = canvas.getBoundingClientRect();
+      for (let t of touches) {
+        const x = t.clientX - rect.left;
+        const y = t.clientY - rect.top;
+        ctx.fillStyle = touches.length === 1 ? "lime" : "red";
+        ctx.beginPath();
+        ctx.arc(x, y, 20, 0, Math.PI * 2);
+        ctx.fill();
       }
+
+      if (touches.length === 2) {
+        ctx.fillStyle = "red";
+        ctx.font = "24px monospace";
+        ctx.fillText("Pinch Detected", 30, 30);
+      }
+
+      requestAnimationFrame(drawLoop);
     }
 
     window.addEventListener("touchstart", e => {
@@ -113,5 +109,6 @@
       touches = [...e.touches];
     }, { passive: false });
   </script>
+
 </body>
 </html>
