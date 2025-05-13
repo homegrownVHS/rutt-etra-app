@@ -2,112 +2,71 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rutt-Etra Touch Diagnostic</title>
+  <title>Camera Diagnostic</title>
   <style>
     html, body {
       margin: 0;
       background: black;
-      overflow: hidden;
+      color: white;
+      font-family: monospace;
       touch-action: none;
-    }
-    canvas {
-      display: block;
+      text-align: center;
     }
     video {
-      position: fixed;
-      top: 100vh;
-      left: 100vw;
-      width: 1px;
-      height: 1px;
-      opacity: 0.01;
-      z-index: -1;
+      width: 100vw;
+      max-height: 60vh;
+      background: #222;
     }
-    #startBtn {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      padding: 10px;
-      font-size: 16px;
-      z-index: 10;
+    button {
+      margin: 1em;
+      padding: 1em 2em;
+      font-size: 18px;
+    }
+    #log {
+      margin-top: 1em;
+      padding: 0 1em;
+      white-space: pre-wrap;
     }
   </style>
 </head>
 <body>
 
+  <h1>Camera Diagnostic</h1>
   <button id="startBtn">Start Camera</button>
   <video id="videoFeed" autoplay muted playsinline></video>
-  <canvas id="canvas"></canvas>
+  <div id="log">Waiting...</div>
 
   <script>
+    const btn = document.getElementById("startBtn");
     const video = document.getElementById("videoFeed");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const startBtn = document.getElementById("startBtn");
+    const log = document.getElementById("log");
 
-    let streaming = false;
-    let touches = [];
-
-    startBtn.onclick = () => {
-      navigator.mediaDevices.getUserMedia({ video: true })
-        .then(stream => {
-          video.srcObject = stream;
-          video.play();
-
-          const onReady = () => {
-            if (streaming) return;
-            streaming = true;
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
-            drawLoop();
-            startBtn.remove();
-          };
-
-          video.addEventListener("canplay", onReady, { once: true });
-          setTimeout(onReady, 2000); // fallback
-        })
-        .catch(err => {
-          alert("Camera error: " + err.message);
-        });
-    };
-
-    function drawLoop() {
-      if (video.paused) video.play();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const rect = canvas.getBoundingClientRect();
-      for (let t of touches) {
-        const x = t.clientX - rect.left;
-        const y = t.clientY - rect.top;
-        ctx.fillStyle = touches.length === 1 ? "lime" : "red";
-        ctx.beginPath();
-        ctx.arc(x, y, 20, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (touches.length === 2) {
-        ctx.fillStyle = "red";
-        ctx.font = "24px monospace";
-        ctx.fillText("Pinch Detected", 30, 30);
-      }
-
-      requestAnimationFrame(drawLoop);
+    function logStatus(msg) {
+      console.log(msg);
+      log.textContent = msg;
     }
 
-    window.addEventListener("touchstart", e => {
-      e.preventDefault();
-      touches = [...e.touches];
-    }, { passive: false });
+    btn.onclick = () => {
+      logStatus("Pressed Start Camera");
 
-    window.addEventListener("touchmove", e => {
-      e.preventDefault();
-      touches = [...e.touches];
-    }, { passive: false });
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        logStatus("getUserMedia not supported in this browser.");
+        return;
+      }
 
-    window.addEventListener("touchend", e => {
-      e.preventDefault();
-      touches = [...e.touches];
-    }, { passive: false });
+      logStatus("Requesting camera access...");
+
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          logStatus("Camera access granted. Playing stream...");
+          video.srcObject = stream;
+          video.play();
+        })
+        .catch(err => {
+          logStatus("Camera error: " + err.message);
+          console.error("getUserMedia error:", err);
+        });
+    };
   </script>
 
 </body>
