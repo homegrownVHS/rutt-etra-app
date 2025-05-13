@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Enhanced Rutt-Etra Mesh</title>
+  <title>Rutt-Etra Enhanced Mesh</title>
   <style>
     html, body {
       margin: 0;
@@ -124,17 +124,19 @@
           function drawLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
             const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixels = frame.data;
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             ctx.lineWidth = 0.8;
+            ctx.globalAlpha = 0.7;
             ctx.shadowBlur = 4;
 
             for (let y = 0; y < canvas.height; y += step) {
-              ctx.beginPath();
-              let first = true;
+              const gradient = ctx.createLinearGradient(0, y, canvas.width, y);
+              const points = [];
 
               for (let x = 0; x < canvas.width; x += step) {
                 const i = (x + y * canvas.width) * 4;
@@ -146,17 +148,18 @@
                 const sx = px + canvas.width / 2;
                 const sy = py + canvas.height / 2;
 
-                ctx.strokeStyle = `rgba(${r},${g},${b}, 0.7)`;
-                ctx.shadowColor = ctx.strokeStyle;
-
-                if (first) {
-                  ctx.moveTo(sx, sy);
-                  first = false;
-                } else {
-                  ctx.lineTo(sx, sy);
-                }
+                points.push([sx, sy]);
+                gradient.addColorStop(x / canvas.width, `rgb(${r},${g},${b})`);
               }
 
+              ctx.strokeStyle = gradient;
+              ctx.shadowColor = gradient;
+
+              ctx.beginPath();
+              ctx.moveTo(points[0][0], points[0][1]);
+              for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i][0], points[i][1]);
+              }
               ctx.stroke();
             }
 
