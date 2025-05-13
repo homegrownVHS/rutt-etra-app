@@ -41,6 +41,10 @@
   <div id="log">Loading...</div>
 
   <script>
+    let currentFacingMode = "user";
+    let doubleTapTimeout = null;
+    let lastTapTime = 0;
+
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
     const video = document.getElementById("videoFeed");
@@ -83,11 +87,25 @@
       lastTouches = t;
     }, { passive: false });
 
-    navigator.mediaDevices.getUserMedia({ video: true })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode } })
       .then(stream => {
         video.srcObject = stream;
         video.addEventListener("loadeddata", () => {
           canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+
+          // Double tap to toggle camera
+          canvas.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTapTime < 300) {
+              currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+              navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode } })
+                .then(newStream => {
+                  video.srcObject = newStream;
+                });
+            }
+            lastTapTime = now;
+          });
           canvas.height = video.videoHeight;
           log.textContent = "Touch mesh ready";
           setTimeout(() => log.style.display = 'none', 5000);
