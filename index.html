@@ -2,43 +2,38 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Video Stream Diagnostic</title>
+  <title>Canvas over Video (iOS Safe)</title>
   <style>
     html, body {
       margin: 0;
-      padding: 0;
       background: black;
-      font-family: monospace;
-      color: white;
-      text-align: center;
+      overflow: hidden;
       touch-action: none;
     }
-    video {
+    #videoFeed, #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
       width: 100vw;
-      height: auto;
-      z-index: 1;
-      position: relative;
+      height: 100vh;
     }
-    canvas {
-      display: none; /* optional: test canvas later */
+    #canvas {
+      pointer-events: none; /* Allow touches to pass through */
     }
     #log {
-      padding: 1em;
-      background: #111;
-      font-size: 14px;
-    }
-    button {
       position: absolute;
-      top: 10px;
-      left: 10px;
-      padding: 10px;
+      bottom: 0;
+      left: 0;
+      color: white;
+      font-family: monospace;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 6px;
       z-index: 100;
     }
   </style>
 </head>
 <body>
 
-  <h1>Live Video Feed Test</h1>
   <video id="videoFeed" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
   <div id="log">Waiting for camera...</div>
@@ -49,35 +44,34 @@
     const ctx = canvas.getContext("2d");
     const log = document.getElementById("log");
 
+    let frame = 0;
+
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => {
         video.srcObject = stream;
-        video.play();
 
         video.addEventListener("loadeddata", () => {
-          log.innerText = "Camera started. Live feed should be visible above.";
+          log.textContent = "Video playing";
 
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
 
-          let frameCount = 0;
-
           function drawLoop() {
-            // This will run even if canvas is hidden
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw overlay
             ctx.fillStyle = "lime";
-            ctx.font = "20px monospace";
-            ctx.fillText("Frame " + frameCount++, 10, 30);
-            console.log("Canvas draw frame:", frameCount);
+            ctx.font = "24px monospace";
+            ctx.fillText("Frame " + frame++, 20, 40);
+
             requestAnimationFrame(drawLoop);
           }
 
-          // Optional: run canvas test too
-          // drawLoop();
+          drawLoop();
         });
       })
       .catch(err => {
-        log.innerText = "Camera error: " + err.message;
+        log.textContent = "Camera error: " + err.message;
         console.error(err);
       });
   </script>
