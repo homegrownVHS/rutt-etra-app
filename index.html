@@ -137,4 +137,22 @@
 
                 let [px, py, pz] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
                 ctx.strokeStyle = `rgb(${r},${g},${b})`;
-                ctx.lineTo(px + canvas.width / 2, py + canvas
+                ctx.lineTo(px + canvas.width / 2, py + canvas.height / 2);
+              }
+              ctx.stroke();
+            }
+
+            requestAnimationFrame(drawLoop);
+          }
+
+          drawLoop();
+        });
+      })
+      .catch(err => {
+        log.textContent = "Camera error: " + err.message;
+        console.error(err);
+      });
+  </script>
+
+</body>
+</html>
