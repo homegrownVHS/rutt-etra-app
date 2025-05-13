@@ -16,7 +16,6 @@
       left: 0;
       width: 100vw;
       height: 100vh;
-      display: block;
     }
     #videoFeed {
       position: absolute;
@@ -132,7 +131,9 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             for (let y = 0; y < canvas.height; y += step) {
-              ctx.beginPath();
+              const gradient = ctx.createLinearGradient(0, y, canvas.width, y);
+              const points = [];
+
               for (let x = 0; x < canvas.width; x += step) {
                 const i = (x + y * canvas.width) * 4;
                 const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
@@ -140,8 +141,15 @@
                 const z = (1 - bright) * zScale;
 
                 const [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
-                ctx.strokeStyle = `rgb(${r},${g},${b})`;
-                ctx.lineTo(px + canvas.width / 2, py + canvas.height / 2);
+                points.push([px + canvas.width / 2, py + canvas.height / 2]);
+                gradient.addColorStop(x / canvas.width, `rgb(${r},${g},${b})`);
+              }
+
+              ctx.beginPath();
+              ctx.strokeStyle = gradient;
+              ctx.moveTo(points[0][0], points[0][1]);
+              for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i][0], points[i][1]);
               }
               ctx.stroke();
             }
