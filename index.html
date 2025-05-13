@@ -18,6 +18,9 @@
       height: 100vh;
       display: block;
     }
+    #videoFeed {
+      display: none; /* MUST stay in DOM for iOS drawImage() to work */
+    }
     #log {
       position: absolute;
       bottom: 0;
@@ -33,13 +36,13 @@
 <body>
 
   <canvas id="canvas"></canvas>
-  <video id="videoFeed" autoplay muted playsinline style="display: none;"></video>
+  <video id="videoFeed" autoplay muted playsinline></video>
   <div id="log">Waiting for camera...</div>
 
   <script>
-    const video = document.getElementById("videoFeed");
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+    const video = document.getElementById("videoFeed");
     const log = document.getElementById("log");
 
     let rotX = 0;
@@ -60,10 +63,9 @@
       let dx = x * cosY + dz * sinY;
       dz = -x * sinY + dz * cosY;
 
-      return [dx * scale, dy * scale, dz * scale];
+      return [dx * scale, dy * scale];
     }
 
-    // Touch controls
     window.addEventListener("touchstart", e => {
       lastTouches = [...e.touches];
     });
@@ -110,7 +112,6 @@
 
         video.addEventListener("loadeddata", () => {
           log.textContent = "Touch mesh ready";
-
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
 
@@ -131,7 +132,7 @@
                 const bright = (r + g + b) / 3 / 255;
                 const z = (1 - bright) * zScale;
 
-                let [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
+                const [px, py] = rotatePoint(x - canvas.width / 2, y - canvas.height / 2, -z);
                 ctx.strokeStyle = `rgb(${r},${g},${b})`;
                 ctx.lineTo(px + canvas.width / 2, py + canvas.height / 2);
               }
