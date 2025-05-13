@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Canvas over Video (iOS Safe)</title>
+  <title>Line Mesh Over Video</title>
   <style>
     html, body {
       margin: 0;
@@ -18,7 +18,7 @@
       height: 100vh;
     }
     #canvas {
-      pointer-events: none; /* Allow touches to pass through */
+      pointer-events: none;
     }
     #log {
       position: absolute;
@@ -44,14 +44,15 @@
     const ctx = canvas.getContext("2d");
     const log = document.getElementById("log");
 
-    let frame = 0;
+    const step = 6;     // Pixel sampling interval
+    const zScale = 80;  // Brightness → depth
 
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => {
         video.srcObject = stream;
 
         video.addEventListener("loadeddata", () => {
-          log.textContent = "Video playing";
+          log.textContent = "Drawing line mesh...";
 
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -59,10 +60,28 @@
           function drawLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw overlay
-            ctx.fillStyle = "lime";
-            ctx.font = "24px monospace";
-            ctx.fillText("Frame " + frame++, 20, 40);
+            // Draw video to offscreen canvas to access pixels
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = frame.data;
+
+            // Clear canvas for drawing
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.lineWidth = 1;
+
+            for (let y = 0; y < canvas.height; y += step) {
+              ctx.beginPath();
+              for (let x = 0; x < canvas.width; x += step) {
+                const i = (x + y * canvas.width) * 4;
+                const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+                const brightness = (r + g + b) / 3 / 255;
+                const z = (1 - brightness) * zScale;
+
+                ctx.strokeStyle = `rgb(${r},${g},${b})`;
+                ctx.lineTo(x, y - z);
+              }
+              ctx.stroke();
+            }
 
             requestAnimationFrame(drawLoop);
           }
