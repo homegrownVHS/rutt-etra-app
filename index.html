@@ -1,59 +1,119 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0>
-  <style> body {padding: 0; margin: 0;} </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
-  <script src="sketch.js"></script>
+  <meta charset="UTF-8" />
+  <title>Rutt-Etra Frame Generator</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+    }
+    #controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+      max-width: 1280px;
+      width: 98vw;
+    }
+    #row1 {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px;
+      border-radius: 8px;
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      min-width: 150px;
+      max-width: 220px;
+    }
+    label {
+      margin-bottom: 4px;
+    }
+    input[type="range"],
+    input[type="file"] {
+      width: 100%;
+    }
+    input[type="file"] {
+      background: #222;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 4px;
+    }
+    button {
+      background: #333;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 1em;
+      margin-top: 6px;
+    }
+    button:hover {
+      background: #666;
+    }
+  </style>
 </head>
 <body>
-  <input type="file" id="vidInput" accept="video/*">
-  <div id="sliders">
-    <label for="depthSlider">Depth:</label>
-    <input type="range" id="depthSlider" min="-200" max="200" value="50"><br>
+  <main></main>
 
-    <label for="tiltXSlider">Tilt X:</label>
-    <input type="range" id="tiltXSlider" min="-90" max="90" value="30"><br>
+  <div id="controls">
+    <div id="row1">
+      <div class="control-group">
+        <label>Upload Video</label>
+        <input type="file" id="vidInput" accept="video/*">
+      </div>
 
-    <label for="tiltYSlider">Tilt Y:</label>
-    <input type="range" id="tiltYSlider" min="-180" max="180" value="0"><br>
+      <div class="control-group">
+        <label for="depthSlider">Depth:</label>
+        <input type="range" id="depthSlider" min="-200" max="200" value="50"><br>
+      </div>
 
-    <label for="scaleSlider">Scale:</label>
-    <input type="range" id="scaleSlider" min="0.1" max="2" value="1" step="0.01"><br>
+      <div class="control-group">
+        <label for="tiltXSlider">Tilt X:</label>
+        <input type="range" id="tiltXSlider" min="-90" max="90" value="30"><br>
+      </div>
 
-    <label for="densitySlider">Density:</label>
-    <input type="range" id="densitySlider" min="1" max="20" value="6" step="1"><br>
+      <div class="control-group">
+        <label for="tiltYSlider">Tilt Y:</label>
+        <input type="range" id="tiltYSlider" min="-180" max="180" value="0"><br>
+      </div>
 
-    <label for="lfoDepth">LFO Depth:</label>
-    <input type="checkbox" id="lfoDepth"><br>
+      <div class="control-group">
+        <label for="scaleSlider">Scale:</label>
+        <input type="range" id="scaleSlider" min="0.1" max="2" value="1" step="0.01"><br>
+      </div>
 
-    <label for="lfoTiltX">LFO Tilt X:</label>
-    <input type="checkbox" id="lfoTiltX"><br>
+      <div class="control-group">
+        <label for="densitySlider">Density:</label>
+        <input type="range" id="densitySlider" min="1" max="20" value="6" step="1"><br>
+      </div>
 
-    <label for="lfoTiltY">LFO Tilt Y:</label>
-    <input type="checkbox" id="lfoTiltY"><br>
-
-    <label for="lfoScale">LFO Scale:</label>
-    <input type="checkbox" id="lfoScale"><br>
-
-    <label for="lfoFreq">LFO Frequency:</label>
-    <input type="range" id="lfoFreq" min="0.01" max="2" value="0.5" step="0.01"><br>
-
-    <label for="lfoAmp">LFO Amplitude:</label>
-    <input type="range" id="lfoAmp" min="0.1" max="100" value="20" step="0.1"><br>
-
-    <label for="lfoType">LFO Type:</label>
-    <select id="lfoType">
-      <option value="sin">Sine</option>
-      <option value="saw">Sawtooth</option>
-      <option value="tri">Triangle</option>
-    </select><br>
-
-    <label for="gammaSlider">Gamma: <span id="gammaLabel">2.2</span></label>
-    <input type="range" id="gammaSlider" min="0.1" max="5" value="2.2" step="0.1"><br>
+      <div class="control-group">
+        <label for="gammaSlider">Gamma: <span id="gammaLabel">2.2</span></label>
+        <input type="range" id="gammaSlider" min="0.1" max="5" value="2.2" step="0.1"><br>
+      </div>
+    </div>
 
     <button id="generateButton">Generate Processed Frames</button>
   </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="sketch.js"></script>
 </body>
 </html>
