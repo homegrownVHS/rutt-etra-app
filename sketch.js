@@ -7,9 +7,7 @@ let shapeYValue = 0; // Controls vertical parabolic bend
 let depthSlider, tiltXSlider, tiltYSlider, scaleSlider, densitySlider, gammaSlider, generateButton, vidInput;
 let shapeXSlider, shapeYSlider, shapeXLabel, shapeYLabel;
 
-// REMOVED: let videoBuffer; // No longer needed
-
-// NEW: Variables for the hidden HTML Canvas for pixel extraction
+// Variables for the hidden HTML Canvas for pixel extraction
 let hiddenPixelCanvas;
 let hiddenPixelCtx;
 
@@ -24,7 +22,7 @@ function setup() {
     console.warn("Could not get WEBGL context.");
   }
 
-  // NEW: Get reference to the hidden canvas and its 2D context
+  // Get reference to the hidden canvas and its 2D context
   hiddenPixelCanvas = document.getElementById('hiddenPixelCanvas');
   hiddenPixelCtx = hiddenPixelCanvas.getContext('2d', { willReadFrequently: true });
   console.log("Hidden pixel extraction canvas initialized.");
@@ -71,7 +69,7 @@ function handleVideoUpload() {
       uploadedVideo.loop(); // Start loop for preview
       uploadedVideo.volume(0); // Mute the video
 
-      // NEW: Set dimensions of hidden canvas to match video
+      // Set dimensions of hidden canvas to match video
       hiddenPixelCanvas.width = uploadedVideo.width;
       hiddenPixelCanvas.height = uploadedVideo.height;
       console.log(`Hidden pixel extraction canvas set to: ${hiddenPixelCanvas.width}x${hiddenPixelCanvas.height}`);
@@ -81,6 +79,8 @@ function handleVideoUpload() {
 
 function applyParabolicBend(normalizedValue, shapeFactor) {
   const center = 0.5;
+  // The bend is strongest at the center (0.5) and 0 at the edges (0 and 1)
+  // shapeFactor now directly scales the magnitude of the bend
   return shapeFactor * (normalizedValue - center) * (normalizedValue - center);
 }
 
@@ -88,11 +88,16 @@ function getWarpedCoordinates(x, y, videoWidth, videoHeight, shapeXFactor, shape
   const normalizedY = y / videoHeight;
   const normalizedX = x / videoWidth;
 
-  const horizontalBend = applyParabolicBend(normalizedY, shapeXFactor * 2);
-  const warpedX = normalizedX * videoWidth + horizontalBend * videoWidth * 0.5;
+  // --- REVERTED FOR YOUR DESIRED BEHAVIOR ---
+  // For horizontal bend (warpedX), the bend amount is based on VERTICAL position (normalizedY)
+  // This creates horizontal displacement of lines, which varies vertically (Rutt/Etra style X-bend).
+  const horizontalBendAmount = applyParabolicBend(normalizedY, shapeXFactor); 
+  const warpedX = x ; 
 
-  const verticalBend = applyParabolicBend(normalizedX, shapeYFactor * 2);
-  const warpedY = normalizedY * videoHeight + verticalBend * videoHeight * 0.5;
+  // For vertical bend (warpedY), the bend amount is based on HORIZONTAL position (normalizedX)
+  // This creates vertical displacement of columns, which varies horizontally (your desired Y-bend).
+  const verticalBendAmount = applyParabolicBend(normalizedX, shapeYFactor);
+  const warpedY = y + verticalBendAmount * videoHeight + horizontalBendAmount * videoWidth; 
 
   return { warpedX, warpedY };
 }
@@ -122,6 +127,7 @@ function draw() {
     for (let y = 0; y < uploadedVideo.height; y += stepSize) {
       beginShape();
       for (let x = 0; x < uploadedVideo.width; x += stepSize) {
+        // Ensure getWarpedCoordinates uses uploadedVideo's dimensions for preview
         const { warpedX, warpedY } = getWarpedCoordinates(x, y, uploadedVideo.width, uploadedVideo.height, shapeXValue, shapeYValue);
 
         let idx = (x + y * uploadedVideo.width) * 4;
@@ -156,7 +162,7 @@ function seekToFrame(frameTime) {
       setTimeout(() => {
         console.log(`Delay finished for ${frameTime.toFixed(3)}s. Current time: ${videoElement.currentTime.toFixed(3)}s. Resolving seek.`);
         resolve();
-      }, 1000); // 1 second delay
+      }, 1000); // 1 second delay - crucial for video frame to fully render
     };
 
     const onError = (e) => {
@@ -180,7 +186,6 @@ function seekToFrame(frameTime) {
 }
 
 async function generateFrames() {
-  // Check for uploadedVideo and the hidden pixel canvas
   if (!uploadedVideo || !uploadedVideo.loadedmetadata || !hiddenPixelCanvas || !hiddenPixelCtx) { 
     console.log("No video uploaded, metadata not loaded, or hidden pixel canvas not ready for generation.");
     alert("Please upload a video first and ensure it loads correctly.");
@@ -218,13 +223,12 @@ async function generateFrames() {
 
       console.log(`Video state before drawing to hidden canvas: currentTime=${uploadedVideo.elt.currentTime.toFixed(3)}s, paused=${uploadedVideo.elt.paused}`);
       
-      // NEW: Draw the raw video element onto the hidden 2D canvas
+      // Draw the raw video element onto the hidden 2D canvas
       hiddenPixelCtx.drawImage(uploadedVideo.elt, 0, 0, hiddenPixelCanvas.width, hiddenPixelCanvas.height);
-      // NEW: Get pixel data directly from the hidden 2D canvas
+      // Get pixel data directly from the hidden 2D canvas
       const imageData = hiddenPixelCtx.getImageData(0, 0, hiddenPixelCanvas.width, hiddenPixelCanvas.height);
       const pixelsData = imageData.data; // This is a Uint8ClampedArray
 
-      // Use pixelsData and hiddenPixelCanvas dimensions for drawing
       if (pixelsData && pixelsData.length > 0) {
         console.log(`Pixels loaded for frame ${currentFrame} from hidden canvas. Array length: ${pixelsData.length}.`);
         let firstPixelR = pixelsData[0];
@@ -238,14 +242,12 @@ async function generateFrames() {
         rotateX(tiltX);
         rotateY(tiltY);
         scale(scl);
-        // Translate based on the original video dimensions for consistency with effects
         translate(-uploadedVideo.width / 2, -uploadedVideo.height / 2, depth); 
 
-        // Loop using hiddenPixelCanvas dimensions for pixel lookup
         for (let y = 0; y < hiddenPixelCanvas.height; y += currentStepSize) {
           beginShape();
           for (let x = 0; x < hiddenPixelCanvas.width; x += currentStepSize) {
-            // getWarpedCoordinates also needs to use the same dimensions the pixels were extracted from
+            // Use the updated getWarpedCoordinates
             const { warpedX, warpedY } = getWarpedCoordinates(x, y, hiddenPixelCanvas.width, hiddenPixelCanvas.height, currentShapeXValue, currentShapeYValue);
 
             let idx = (x + y * hiddenPixelCanvas.width) * 4;
@@ -264,7 +266,6 @@ async function generateFrames() {
         }
         pop();
 
-        // Small delay BEFORE saving to allow canvas to fully render (especially with WEBGL)
         await new Promise(resolve => setTimeout(resolve, 50)); 
 
         saveCanvas(`frame_${nf(currentFrame, 4)}`, 'png');
@@ -275,7 +276,6 @@ async function generateFrames() {
         currentFrame++;
       }
 
-      // Existing longer delay AFTER saving for browser processing downloads
       await new Promise(resolve => setTimeout(resolve, 500)); 
     } catch (error) {
       console.error(`ERROR processing frame ${currentFrame}:`, error);

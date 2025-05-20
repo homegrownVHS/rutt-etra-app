@@ -59,7 +59,7 @@ def create_video_from_frames(image_folder, output_video_path, fps=30, image_patt
 
 if __name__ == "__main__":
     # Get user inputs
-    image_folder = "/Users/adam/Downloads/frames" # Hardcoded path
+    image_folder = "/Users/adam/Desktop/frames" # Hardcoded path
     #output_video_path = input("Enter the desired path and filename for the output video (e.g., 'output.mp4'): ")
     fps_input = input("Enter the frames per second for the output video (default is 30): ")
     image_pattern = input("Enter the filename pattern of the image frames (default is 'frame_%04d.png'): ")
