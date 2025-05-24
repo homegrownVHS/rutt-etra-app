@@ -28,6 +28,13 @@ let waveFreqSlider, waveFreqLabel;
 // Gamma Slider and Label
 let gammaSlider, gammaLabel;
 
+// NEW: Ramp Amplification variables
+let horizAmpSlider, horizAmpLabel;
+let vertAmpSlider, vertAmpLabel;
+let lfoHorizAmp, lfoVertAmp;
+let horizontalAmplification = 1.0;
+let verticalAmplification = 1.0;
+
 // NEW: Single flag to indicate if the current source (camera or uploaded media) is ready
 let currentSourceReady = false;
 
@@ -79,6 +86,14 @@ function setup() {
   gammaSlider = select("#gammaSlider");
   gammaLabel = select("#gammaLabel");
 
+  // NEW: Initialize new sliders and labels
+  horizAmpSlider = select("#horizAmpSlider");
+  horizAmpLabel = select("#horizAmpLabel");
+  vertAmpSlider = select("#vertAmpSlider");
+  vertAmpLabel = select("#vertAmpLabel");
+  lfoHorizAmp = select("#lfoHorizAmp");
+  lfoVertAmp = select("#lfoVertAmp");
+
 
   let controlsDiv = select("#controls");
   controlsDiv.mouseOver(() => controlsHovering = true);
@@ -107,6 +122,16 @@ function setup() {
   gammaSlider.input(() => {
     gammaValue = Number(gammaSlider.value());
     gammaLabel.html(gammaValue.toFixed(1));
+  });
+
+  // NEW: Input handlers for new sliders
+  horizAmpSlider.input(() => {
+    horizontalAmplification = Number(horizAmpSlider.value());
+    horizAmpLabel.html(horizontalAmplification.toFixed(1));
+  });
+  vertAmpSlider.input(() => {
+    verticalAmplification = Number(vertAmpSlider.value());
+    vertAmpLabel.html(verticalAmplification.toFixed(1));
   });
 
 
@@ -222,7 +247,8 @@ function applyParabolicBend(normalizedValue, shapeFactor) {
   return shapeFactor * (normalizedValue - center) * (normalizedValue - center);
 }
 
-function getWarpedCoordinates(x, y, videoWidth, videoHeight, shapeXFactor, shapeYFactor, currentWaveAmplitude, currentWaveFrequency) {
+// MODIFIED: Added horizontalAmplification and verticalAmplification parameters
+function getWarpedCoordinates(x, y, videoWidth, videoHeight, shapeXFactor, shapeYFactor, currentWaveAmplitude, currentWaveFrequency, horizontalAmplification, verticalAmplification) {
   const normalizedY = y / videoHeight;
   const normalizedX = x / videoWidth;
 
@@ -235,8 +261,9 @@ function getWarpedCoordinates(x, y, videoWidth, videoHeight, shapeXFactor, shape
   const waveDisplacementX = scaledWaveAmplitudeX * sin(normalizedY * PI * 2 * currentWaveFrequency);
   const waveDisplacementY = scaledWaveAmplitudeY * sin(normalizedX * PI * 2 * currentWaveFrequency);
 
-  let warpedX = x + waveDisplacementX;
-  let warpedY = y + (verticalBendAmount * videoHeight * 1.0) + (horizontalBendAmount * videoWidth * 1.0) + waveDisplacementY;
+  // NEW: Apply amplification to x and y coordinates
+  let warpedX = (x * horizontalAmplification) + waveDisplacementX;
+  let warpedY = (y * verticalAmplification) + (verticalBendAmount * videoHeight * 1.0) + (horizontalBendAmount * videoWidth * 1.0) + waveDisplacementY;
 
   return { warpedX, warpedY };
 }
@@ -308,6 +335,19 @@ function draw() {
   // Ensure frequency doesn't go negative if LFO causes it
   currentWaveFrequency = max(0, currentWaveFrequency);
 
+  // NEW: Get base values for Ramp Amplification effects
+  let baseHorizAmp = Number(horizAmpSlider.value());
+  let baseVertAmp = Number(vertAmpSlider.value());
+
+  // NEW: Apply LFO to Ramp Amplification values
+  let currentHorizAmp = baseHorizAmp + (lfoHorizAmp.checked() ? lfo * 0.5 * lfoAmp : 0);
+  let currentVertAmp = baseVertAmp + (lfoVertAmp.checked() ? lfo * 0.5 * lfoAmp : 0);
+
+  // NEW: Ensure amplification values don't go negative
+  currentHorizAmp = max(0, currentHorizAmp);
+  currentVertAmp = max(0, currentVertAmp);
+
+
   // Update Labels for all controls
   select("#depthLabel").html(depth.toFixed(0));
   select("#tiltXLabel").html((Number(tiltXSlider.value())).toFixed(0) + "°");
@@ -319,6 +359,9 @@ function draw() {
   select("#waveAmpLabel").html(currentWaveAmplitude.toFixed(1));
   select("#waveFreqLabel").html(currentWaveFrequency.toFixed(1));
   select("#gammaLabel").html(gammaValue.toFixed(1));
+  // NEW: Update labels for new sliders
+  select("#horizAmpLabel").html(currentHorizAmp.toFixed(1));
+  select("#vertAmpLabel").html(currentVertAmp.toFixed(1));
 
 
   rotX = lerp(rotX, targetRotX, 0.1);
@@ -337,7 +380,9 @@ function draw() {
   rotateX(rotX + tiltX);
   rotateY(rotY + tiltY);
   scale(scl * scaleFactor);
-  translate(-bufferWidth / 2, -bufferHeight / 2);
+
+  // MODIFIED: Adjust translation based on current amplification values to re-center the raster
+  translate(-bufferWidth * currentHorizAmp / 2, -bufferHeight * currentVertAmp / 2);
 
   src.loadPixels();
   if (src.pixels.length === 0) {
@@ -348,7 +393,8 @@ function draw() {
   for (let y = 0; y < bufferHeight; y += stepSize) {
     beginShape();
     for (let x = 0; x < bufferWidth; x += stepSize) {
-      const { warpedX, warpedY } = getWarpedCoordinates(x, y, bufferWidth, bufferHeight, currentShapeXValue, currentShapeYValue, currentWaveAmplitude, currentWaveFrequency);
+      // MODIFIED: Pass new amplification values
+      const { warpedX, warpedY } = getWarpedCoordinates(x, y, bufferWidth, bufferHeight, currentShapeXValue, currentShapeYValue, currentWaveAmplitude, currentWaveFrequency, currentHorizAmp, currentVertAmp);
 
       let idx = (x + y * bufferWidth) * 4;
       let r = src.pixels[idx];
@@ -394,6 +440,9 @@ function handleCustomMIDIMessage(message) {
     42: 'waveAmpSlider',
     43: 'waveFreqSlider',
     46: 'gammaSlider',
+    // NEW: MIDI mapping for new sliders
+    47: 'horizAmpSlider',
+    48: 'vertAmpSlider',
 
     32: 'lfoDepth',
     33: 'lfoTiltX',
@@ -402,7 +451,10 @@ function handleCustomMIDIMessage(message) {
     38: 'lfoShapeX',
     39: 'lfoShapeY',
     44: 'lfoWaveAmp',
-    45: 'lfoWaveFreq'
+    45: 'lfoWaveFreq',
+    // NEW: MIDI mapping for new LFO checkboxes
+    49: 'lfoHorizAmp',
+    50: 'lfoVertAmp'
   };
 
   let controlId = midiMap[cc];
