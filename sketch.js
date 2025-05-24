@@ -1,3 +1,4 @@
+// sketch.js
 let cam, uploadedMedia, uploadedType = null;
 let stepSize = 6;
 
@@ -21,21 +22,27 @@ let waveFrequency = 0;
 let gammaValue = 2.2;
 
 // Sliders and labels for Shape and Wave Displacement
-let shapeXSlider, shapeYSlider, shapeXLabel, shapeYLabel;
+let shapeXSlider, shapeYSlider, shapeXLabel, shapeYYLabel;
 let waveAmpSlider, waveAmpLabel;
 let waveFreqSlider, waveFreqLabel;
 
 // Gamma Slider and Label
 let gammaSlider, gammaLabel;
 
-// NEW: Ramp Amplification variables
+// Ramp Amplification variables
 let horizAmpSlider, horizAmpLabel;
 let vertAmpSlider, vertAmpLabel;
 let lfoHorizAmp, lfoVertAmp;
 let horizontalAmplification = 1.0;
 let verticalAmplification = 1.0;
 
-// NEW: Single flag to indicate if the current source (camera or uploaded media) is ready
+// NEW: Offset variables for the D-pad
+let offsetXSlider, offsetYSlider, offsetXLabel, offsetYLabel;
+let lfoOffsetX, lfoOffsetY;
+let offsetX = 0;
+let offsetY = 0;
+
+// Single flag to indicate if the current source (camera or uploaded media) is ready
 let currentSourceReady = false;
 
 let selectedDeviceId = null;
@@ -48,6 +55,9 @@ let targetRotY = 0;
 
 let lfoPhase = 0;
 let lfoTypes = ['saw', 'sin', 'tri'];
+
+// Download button variable
+let downloadBtn;
 
 function setup() {
   createCanvas(1280, 720, WEBGL);
@@ -86,13 +96,26 @@ function setup() {
   gammaSlider = select("#gammaSlider");
   gammaLabel = select("#gammaLabel");
 
-  // NEW: Initialize new sliders and labels
+  // Initialize new sliders and labels
   horizAmpSlider = select("#horizAmpSlider");
   horizAmpLabel = select("#horizAmpLabel");
   vertAmpSlider = select("#vertAmpSlider");
   vertAmpLabel = select("#vertAmpLabel");
   lfoHorizAmp = select("#lfoHorizAmp");
   lfoVertAmp = select("#lfoVertAmp");
+
+  // NEW: Initialize offset sliders and labels
+  offsetXSlider = select("#offsetXSlider");
+  offsetYSlider = select("#offsetYSlider");
+  offsetXLabel = select("#offsetXLabel");
+  offsetYLabel = select("#offsetYLabel");
+  lfoOffsetX = select("#lfoOffsetX");
+  lfoOffsetY = select("#lfoOffsetY");
+
+
+  // Initialize download button and add click listener
+  downloadBtn = select("#downloadBtn");
+  downloadBtn.mousePressed(saveImage);
 
 
   let controlsDiv = select("#controls");
@@ -101,6 +124,15 @@ function setup() {
 
   imgInput.changed(handleImageUpload);
   vidInput.changed(handleVideoUpload);
+
+  // Add drag and drop functionality
+  let mainCanvas = select("main");
+  mainCanvas.dragOver(() => {
+    // Prevent default browser behavior for drag and drop
+    return false;
+  });
+  mainCanvas.drop(handleFileDrop);
+
 
   shapeXSlider.input(() => {
     shapeXValue = Number(shapeXSlider.value());
@@ -124,7 +156,7 @@ function setup() {
     gammaLabel.html(gammaValue.toFixed(1));
   });
 
-  // NEW: Input handlers for new sliders
+  // Input handlers for new sliders
   horizAmpSlider.input(() => {
     horizontalAmplification = Number(horizAmpSlider.value());
     horizAmpLabel.html(horizontalAmplification.toFixed(1));
@@ -132,6 +164,16 @@ function setup() {
   vertAmpSlider.input(() => {
     verticalAmplification = Number(vertAmpSlider.value());
     vertAmpLabel.html(verticalAmplification.toFixed(1));
+  });
+
+  // NEW: Input handlers for offset sliders
+  offsetXSlider.input(() => {
+    offsetX = Number(offsetXSlider.value());
+    offsetXLabel.html(offsetX.toFixed(0));
+  });
+  offsetYSlider.input(() => {
+    offsetY = Number(offsetYSlider.value());
+    offsetYLabel.html(offsetY.toFixed(0));
   });
 
 
@@ -238,6 +280,58 @@ function handleVideoUpload() {
   }
 }
 
+// Function to handle file drop
+function handleFileDrop(file) {
+  if (file.type === 'image') {
+    currentSourceReady = false;
+    if (cam) cam.remove();
+    cam = null;
+    uploadedMedia = null;
+    uploadedType = null;
+
+    loadImage(file.data, img => {
+      img.resize(640, 480);
+      uploadedMedia = img;
+      uploadedType = 'image';
+      currentSourceReady = true;
+    }, (event) => {
+        console.error("Error loading dropped image:", event);
+        currentSourceReady = false;
+    });
+  } else if (file.type === 'video') {
+    currentSourceReady = false;
+    if (cam) cam.remove();
+    cam = null;
+    uploadedMedia = null;
+    uploadedType = null;
+
+    let vid = createVideo([file.data]);
+    vid.elt.onloadedmetadata = () => {
+      vid.size(640, 480);
+      vid.hide();
+      vid.loop();
+      vid.volume(0);
+      uploadedMedia = vid;
+      uploadedType = 'video';
+      currentSourceReady = true;
+    };
+
+    vid.elt.onerror = (e) => {
+      console.error("Video loading error from drop:", e);
+      currentSourceReady = false;
+      uploadedMedia = null;
+    };
+
+    vid.elt.load();
+  }
+}
+
+// Function to save the canvas as an image
+function saveImage() {
+  // Use saveCanvas() from p5.js to download the current canvas frame
+  saveCanvas('rutt-etra-output', 'png');
+}
+
 function applyGamma(value, gamma) {
   return pow(value, 1 / gamma);
 }
@@ -261,7 +355,7 @@ function getWarpedCoordinates(x, y, videoWidth, videoHeight, shapeXFactor, shape
   const waveDisplacementX = scaledWaveAmplitudeX * sin(normalizedY * PI * 2 * currentWaveFrequency);
   const waveDisplacementY = scaledWaveAmplitudeY * sin(normalizedX * PI * 2 * currentWaveFrequency);
 
-  // NEW: Apply amplification to x and y coordinates
+  // Apply amplification to x and y coordinates
   let warpedX = (x * horizontalAmplification) + waveDisplacementX;
   let warpedY = (y * verticalAmplification) + (verticalBendAmount * videoHeight * 1.0) + (horizontalBendAmount * videoWidth * 1.0) + waveDisplacementY;
 
@@ -280,12 +374,7 @@ function getLFOValue(type, freq) {
   }
 }
 
-function mouseDragged() {
-  if (!controlsHovering) {
-    targetRotY += (movedX * 0.01);
-    targetRotX -= (movedY * 0.01);
-  }
-}
+// REMOVED: mouseDragged() function
 
 function draw() {
   background(0);
@@ -335,18 +424,23 @@ function draw() {
   // Ensure frequency doesn't go negative if LFO causes it
   currentWaveFrequency = max(0, currentWaveFrequency);
 
-  // NEW: Get base values for Ramp Amplification effects
+  // Get base values for Ramp Amplification effects
   let baseHorizAmp = Number(horizAmpSlider.value());
   let baseVertAmp = Number(vertAmpSlider.value());
 
-  // NEW: Apply LFO to Ramp Amplification values
+  // Apply LFO to Ramp Amplification values
   let currentHorizAmp = baseHorizAmp + (lfoHorizAmp.checked() ? lfo * 0.5 * lfoAmp : 0);
   let currentVertAmp = baseVertAmp + (lfoVertAmp.checked() ? lfo * 0.5 * lfoAmp : 0);
 
-  // NEW: Ensure amplification values don't go negative
+  // Ensure amplification values don't go negative
   currentHorizAmp = max(0, currentHorizAmp);
   currentVertAmp = max(0, currentVertAmp);
 
+  // NEW: Get base values for Offset and apply LFO
+  let baseOffsetX = Number(offsetXSlider.value());
+  let baseOffsetY = Number(offsetYSlider.value());
+  let currentOffsetX = baseOffsetX + (lfoOffsetX.checked() ? lfo * 100 * lfoAmp : 0); // Adjust LFO amplitude as needed
+  let currentOffsetY = baseOffsetY + (lfoOffsetY.checked() ? lfo * 100 * lfoAmp : 0); // Adjust LFO amplitude as needed
 
   // Update Labels for all controls
   select("#depthLabel").html(depth.toFixed(0));
@@ -359,9 +453,12 @@ function draw() {
   select("#waveAmpLabel").html(currentWaveAmplitude.toFixed(1));
   select("#waveFreqLabel").html(currentWaveFrequency.toFixed(1));
   select("#gammaLabel").html(gammaValue.toFixed(1));
-  // NEW: Update labels for new sliders
+  // Update labels for new sliders
   select("#horizAmpLabel").html(currentHorizAmp.toFixed(1));
   select("#vertAmpLabel").html(currentVertAmp.toFixed(1));
+  // NEW: Update labels for offset sliders
+  select("#offsetXLabel").html(currentOffsetX.toFixed(0));
+  select("#offsetYLabel").html(currentOffsetY.toFixed(0));
 
 
   rotX = lerp(rotX, targetRotX, 0.1);
@@ -381,8 +478,12 @@ function draw() {
   rotateY(rotY + tiltY);
   scale(scl * scaleFactor);
 
-  // MODIFIED: Adjust translation based on current amplification values to re-center the raster
-  translate(-bufferWidth * currentHorizAmp / 2, -bufferHeight * currentVertAmp / 2);
+  // Adjust translation based on current amplification values to re-center the raster
+  // NEW: Apply translation based on currentOffsetX and currentOffsetY
+  translate(
+    -bufferWidth * currentHorizAmp / 2 + currentOffsetX,
+    -bufferHeight * currentVertAmp / 2 + currentOffsetY
+  );
 
   src.loadPixels();
   if (src.pixels.length === 0) {
@@ -393,7 +494,7 @@ function draw() {
   for (let y = 0; y < bufferHeight; y += stepSize) {
     beginShape();
     for (let x = 0; x < bufferWidth; x += stepSize) {
-      // MODIFIED: Pass new amplification values
+      // Pass new amplification values
       const { warpedX, warpedY } = getWarpedCoordinates(x, y, bufferWidth, bufferHeight, currentShapeXValue, currentShapeYValue, currentWaveAmplitude, currentWaveFrequency, currentHorizAmp, currentVertAmp);
 
       let idx = (x + y * bufferWidth) * 4;
@@ -440,9 +541,12 @@ function handleCustomMIDIMessage(message) {
     42: 'waveAmpSlider',
     43: 'waveFreqSlider',
     46: 'gammaSlider',
-    // NEW: MIDI mapping for new sliders
+    // MIDI mapping for new sliders
     47: 'horizAmpSlider',
     48: 'vertAmpSlider',
+    // NEW: MIDI mapping for offset sliders
+    51: 'offsetXSlider', // Assign a unique CC number for offsetX
+    52: 'offsetYSlider', // Assign a unique CC number for offsetY
 
     32: 'lfoDepth',
     33: 'lfoTiltX',
@@ -452,9 +556,12 @@ function handleCustomMIDIMessage(message) {
     39: 'lfoShapeY',
     44: 'lfoWaveAmp',
     45: 'lfoWaveFreq',
-    // NEW: MIDI mapping for new LFO checkboxes
+    // MIDI mapping for new LFO checkboxes
     49: 'lfoHorizAmp',
-    50: 'lfoVertAmp'
+    50: 'lfoVertAmp',
+    // NEW: MIDI mapping for LFO offset checkboxes
+    53: 'lfoOffsetX', // Assign a unique CC number for lfoOffsetX
+    54: 'lfoOffsetY'  // Assign a unique CC number for lfoOffsetY
   };
 
   let controlId = midiMap[cc];
