@@ -53,11 +53,17 @@ let rotY = 0;
 let targetRotX = 30;
 let targetRotY = 0;
 
-let lfoPhase = 0;
+let lfoPhase = 0; // For real-time LFO
 let lfoTypes = ['saw', 'sin', 'tri'];
 
 // Download button variable
 let downloadBtn;
+
+// NEW: Export automation variables
+let currentFrameForExportInput, totalFramesForExportInput, startExportBtn, nextFrameBtn, currentFrameLabel;
+let currentFrameForExport = 0;
+let totalFramesForExport = 0;
+let exportMode = false; // Flag to indicate if we are in export mode
 
 function setup() {
   createCanvas(1280, 720, WEBGL);
@@ -112,10 +118,18 @@ function setup() {
   lfoOffsetX = select("#lfoOffsetX");
   lfoOffsetY = select("#lfoOffsetY");
 
-
   // Initialize download button and add click listener
   downloadBtn = select("#downloadBtn");
   downloadBtn.mousePressed(saveImage);
+
+  // NEW: Initialize export controls
+  currentFrameForExportInput = select("#currentFrameForExportInput"); // Hidden input
+  totalFramesForExportInput = select("#totalFramesForExportInput");
+  startExportBtn = select("#startExportBtn");
+  startExportBtn.mousePressed(startExport);
+  nextFrameBtn = select("#nextFrameBtn"); // New button
+  nextFrameBtn.mousePressed(goToNextFrame); // New button handler
+  currentFrameLabel = select("#currentFrameLabel"); // New label
 
 
   let controlsDiv = select("#controls");
@@ -192,6 +206,7 @@ function setup() {
     selectedDeviceId = camSelect.value();
     if (cam) cam.remove();
     uploadedMedia = null; // Clear uploaded media if switching to camera
+    uploadedType = null;
     currentSourceReady = false; // Reset flag for new source
     startCam(selectedDeviceId);
   });
@@ -202,6 +217,9 @@ function setup() {
   if (navigator.requestMIDIAccess) {
     navigator.requestMIDIAccess().then(onMIDISuccess);
   }
+
+  // Initialize current frame display
+  currentFrameLabel.html(currentFrameForExport);
 }
 
 function startCam(deviceId) {
@@ -329,7 +347,12 @@ function handleFileDrop(file) {
 // Function to save the canvas as an image
 function saveImage() {
   // Use saveCanvas() from p5.js to download the current canvas frame
-  saveCanvas('rutt-etra-output', 'png');
+  // Name the file with the current export frame if in export mode
+  if (exportMode) {
+    saveCanvas(`rutt-etra-frame-${nf(currentFrameForExport, 4)}`, 'png');
+  } else {
+    saveCanvas('rutt-etra-output', 'png');
+  }
 }
 
 function applyGamma(value, gamma) {
@@ -362,6 +385,7 @@ function getWarpedCoordinates(x, y, videoWidth, videoHeight, shapeXFactor, shape
   return { warpedX, warpedY };
 }
 
+// Original LFO calculation for real-time
 function getLFOValue(type, freq) {
   lfoPhase += freq * 0.01;
   if (lfoPhase > 1) lfoPhase -= 1;
@@ -370,6 +394,22 @@ function getLFOValue(type, freq) {
     case "saw": return (lfoPhase * 2.0) - 1.0;
     case "sin": return sin(TWO_PI * lfoPhase);
     case "tri": return abs((lfoPhase * 4) - 2) - 1;
+    default: return 0;
+  }
+}
+
+// NEW: LFO calculation for export mode (frame-based)
+function getLFOValueForExport(type, currentFrame, totalFrames) {
+  if (totalFrames <= 0) return 0; // Avoid division by zero
+
+  // Calculate phase based on the current frame and total frames
+  // This ensures one full cycle over the totalFrames
+  let phase = (currentFrame % totalFrames) / totalFrames;
+
+  switch (type) {
+    case "saw": return (phase * 2.0) - 1.0;
+    case "sin": return sin(TWO_PI * phase);
+    case "tri": return abs((phase * 4) - 2) - 1;
     default: return 0;
   }
 }
@@ -400,7 +440,15 @@ function draw() {
   let lfoFreq = Number(lfoFreqSlider.value());
   let lfoAmp = Number(lfoAmpSlider.value());
   let lfoType = lfoTypeSelector.value();
-  let lfo = getLFOValue(lfoType, lfoFreq);
+  let lfo;
+
+  // Choose LFO calculation based on export mode
+  if (exportMode) {
+    lfo = getLFOValueForExport(lfoType, currentFrameForExport, totalFramesForExport);
+  } else {
+    lfo = getLFOValue(lfoType, lfoFreq);
+  }
+
 
   // Apply LFO to existing base values
   let depth = baseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
@@ -520,6 +568,56 @@ function draw() {
   pop();
 }
 
+// Function to reset export state (e.g., after completing a video)
+function resetExport() {
+  exportMode = false;
+  currentFrameForExport = 0;
+  currentFrameForExportInput.value = 0; // Update hidden input
+  currentFrameLabel.html(currentFrameForExport); // Update UI label
+  console.log("Export mode deactivated. Current frame reset to 0.");
+}
+
+// NEW: Automated export initiation
+function startExport() {
+  if (!currentSourceReady) {
+    console.warn("Source media not ready for export. Please upload an image or video first.");
+    return;
+  }
+
+  totalFramesForExport = Number(totalFramesForExportInput.value());
+  if (totalFramesForExport <= 0) {
+    console.error("Total frames for export must be a positive number.");
+    return;
+  }
+
+  // Set export mode to true, so draw() uses the frame-based LFO
+  exportMode = true;
+  currentFrameForExport = 0; // Reset frame counter for a new export session
+  currentFrameForExportInput.value = currentFrameForExport; // Update hidden input
+  currentFrameLabel.html(currentFrameForExport); // Update UI label
+
+  console.log(`Export mode activated for ${totalFramesForExport} frames. Drag first image, then use 'Next Frame' and 'Download Image'.`);
+}
+
+// NEW: Function to go to the next frame
+function goToNextFrame() {
+  if (!exportMode) {
+    console.warn("Please click 'Start Export' first to begin the frame-based LFO process.");
+    return;
+  }
+
+  if (currentFrameForExport < totalFramesForExport - 1) {
+    currentFrameForExport++;
+    currentFrameForExportInput.value = currentFrameForExport; // Update hidden input
+    currentFrameLabel.html(currentFrameForExport); // Update UI label
+    console.log(`Moved to frame: ${currentFrameForExport}`);
+    redraw(); // Force a redraw to show the updated LFO state for the current frame
+  } else {
+    console.log("Reached the last frame. Resetting export mode.");
+    resetExport();
+  }
+}
+
 function onMIDISuccess(midiAccess) {
   for (let input of midiAccess.inputs.values()) {
     input.onmidimessage = handleCustomMIDIMessage;
@@ -576,6 +674,11 @@ function handleCustomMIDIMessage(message) {
     let mapped = min + (val / 127) * (max - min);
     control.value(mapped);
   } else if (control.elt.type === 'checkbox') {
-    if (val > 0) control.elt.checked = !control.elt.checked;
+    // Toggle checkbox only if the MIDI value is non-zero (or a specific trigger value)
+    if (val > 0) { // Assuming any non-zero value acts as a toggle signal
+        control.elt.checked = !control.elt.checked;
+    }
+    // For MIDI buttons that send 0 and 127 for on/off:
+    // control.elt.checked = (val > 63); // For on/off behavior
   }
 }
