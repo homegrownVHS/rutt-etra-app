@@ -2,22 +2,29 @@
 precision highp float;
 
 uniform sampler2D uSampler;
-uniform float uStepSize; // From sketch.js, controls line density
+uniform float uStepSize; // No longer directly used for striping, but kept for consistency
+uniform vec2 uResolution; // Keeping for consistency
+uniform float uGamma; // Gamma value from sketch.js
 
-in vec2 vTexCoord; // Original texture coordinates (can be used for effects, but not direct sampling)
-in vec2 vDisplacedTexCoord; // The texture coordinate calculated and displaced in the vertex shader
+in vec2 vTexCoord; // Original texture coordinates
+in float vProjectedY; // Projected Y-coordinate from vertex shader (screen space pixels)
 
 out vec4 fragColor;
 
+// Function to apply gamma correction
+vec3 applyGammaCorrection(vec3 color, float gamma) {
+    return pow(color, vec3(1.0 / gamma));
+}
+
 void main() {
-    // Determine if the current fragment should be drawn as part of a scanline
-    // gl_FragCoord.y is the pixel coordinate of the current fragment on the screen
-    // uStepSize defines the height of each line/gap
-    if (mod(gl_FragCoord.y, uStepSize * 2.0) < uStepSize) {
-        // This fragment is part of a "line"
-        fragColor = texture(uSampler, vDisplacedTexCoord);
-    } else {
-        // This fragment is part of the "gap" between lines
-        fragColor = vec4(0.0, 0.0, 0.0, 1.0); // Make it black to create the gaps
-    }
+    // Sample the texture color using the original texture coordinates
+    vec4 sampledColor = texture(uSampler, vTexCoord);
+
+    // Apply gamma correction to the sampled color
+    vec3 gammaCorrectedColor = applyGammaCorrection(sampledColor.rgb, uGamma);
+
+    // Directly output the gamma-corrected color.
+    // The 3D displacement is handled by the vertex shader deforming the geometry.
+    // This removes the horizontal striping (scanline effect).
+    fragColor = vec4(gammaCorrectedColor, sampledColor.a);
 }

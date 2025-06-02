@@ -434,7 +434,7 @@ function getLFOValueForExport(type, currentFrame, totalFrames) {
 
   switch (type) {
     case "saw": return (phase * 2.0) - 1.0;
-    case "sin": return sin(TWO_PI * phase);
+    case "sin": return sin(TWO_PI * lfoPhase);
     case "tri": return abs((phase * 4) - 2) - 1;
     default: return 0;
   }
@@ -529,7 +529,7 @@ function draw() {
     // This creates a mesh with enough vertices for per-line Z-displacement
     // A higher density (lower stepSize) means more vertical subdivisions.
     let detailY = max(2, int(height / densitySlider.value())); // Number of vertical subdivisions
-    let detailX = max(2, int(width / 20)); // Keep horizontal detail reasonable, can be adjusted
+    let detailX = max(2, int(width / 5)); // Increased horizontal detail for smoother displacement
 
     // Draw a highly subdivided plane to cover the entire graphics canvas
     graphics.plane(width, height, detailX, detailY);
