@@ -519,14 +519,20 @@ function draw() {
 
     // Apply transformations directly to the graphics object
     graphics.push();
-    graphics.translate(0, 0, 0);
+    graphics.translate(0, 0, 0); // Z-displacement is handled in shader
     graphics.rotateX(tiltX);
     graphics.rotateY(tiltY);
     graphics.scale(scl);
     graphics.noStroke();
 
-    // Draw a rectangle to cover the entire graphics canvas
-    graphics.plane(width, height);
+    // Calculate subdivisions for the plane based on density slider
+    // This creates a mesh with enough vertices for per-line Z-displacement
+    // A higher density (lower stepSize) means more vertical subdivisions.
+    let detailY = max(2, int(height / densitySlider.value())); // Number of vertical subdivisions
+    let detailX = max(2, int(width / 20)); // Keep horizontal detail reasonable, can be adjusted
+
+    // Draw a highly subdivided plane to cover the entire graphics canvas
+    graphics.plane(width, height, detailX, detailY);
     graphics.pop();
   }
 
