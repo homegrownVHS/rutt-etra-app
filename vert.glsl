@@ -47,7 +47,7 @@ void main() {
     float centeredBrightness = gammaCorrectedBrightness - 0.5;
 
     // Significantly increased scaling of uDepth to make the Z-displacement very prominent.
-    float zDisplacement = centeredBrightness * uDepth * 10.0; // Increased multiplier for visibility
+    float zDisplacement = centeredBrightness * uDepth * 10.0 ; // Increased multiplier for visibility
 
     // Start with the original vertex position in NDC space
     vec3 transformedPosition = aPosition;
@@ -56,7 +56,7 @@ void main() {
     // Convert NDC [-1, 1] to [0, 1] for bend/wave calculations
     vec2 normalizedPosXY = (transformedPosition.xy + 1.0) / 2.0;
 
-    float horizontalBend = applyParabolicBend(normalizedPosXY.y, uShapeX);
+    float horizontalBend = applyParabolicBend(normalizedPosXY.x, uShapeX);
     float verticalBend = applyParabolicBend(normalizedPosXY.x, uShapeY);
 
     // Scale wave amplitude to NDC space (relative to canvas size)
