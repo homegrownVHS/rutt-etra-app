@@ -447,6 +447,10 @@ function getLFOValueForExport(type, currentFrame, totalFrames) {
   }
 }
 
+// Global variables for the moving average filter (add these outside the draw function)
+let depthHistory = [];
+const depthHistorySize = 50; // Adjust this value to change the smoothing effect (e.g., 5, 10, 20)
+
 function draw() {
   background(0); // Clear the main canvas
 
@@ -490,8 +494,19 @@ function draw() {
       lfo = getLFOValue(lfoType, lfoFreq);
     }
 
+    // --- Moving Average Filter for Depth Calculation ---
+    // Add the current depth slider value to the history
+    depthHistory.push(Number(depthSlider.value()));
+    // If history exceeds size, remove the oldest value
+    if (depthHistory.length > depthHistorySize) {
+      depthHistory.shift(); // Remove the first element
+    }
+    // Calculate the average of the depth history
+    let averagedBaseDepth = depthHistory.reduce((sum, val) => sum + val, 0) / depthHistory.length;
+    // --- End Moving Average Filter ---
+
     // Apply LFO to existing base values and pass as uniforms
-    let depth = Number(depthSlider.value()) + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
+    let depth = averagedBaseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0); // Use averagedBaseDepth
     let tiltX = radians(Number(tiltXSlider.value())) + (lfoTiltX.checked() ? lfo * PI * lfoAmp : 0);
     let tiltY = radians(Number(tiltYSlider.value())) + (lfoTiltY.checked() ? lfo * PI * lfoAmp : 0);
     let scl = Number(scaleSlider.value()) + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
@@ -548,7 +563,7 @@ function draw() {
   image(graphics, -width / 2, -height / 2, width, height);
 
   // Update labels (these are still in JS)
-  select("#depthLabel").html(Number(depthSlider.value()).toFixed(0));
+  select("#depthLabel").html(Number(depthSlider.value()).toFixed(0)); // This label still shows the raw slider value
   select("#tiltXLabel").html((Number(tiltXSlider.value())).toFixed(0) + "°");
   select("#tiltYLabel").html(tiltYSlider.value() + "°");
   select("#scaleLabel").html(Number(scaleSlider.value()).toFixed(2));
@@ -563,6 +578,7 @@ function draw() {
   select("#offsetXLabel").html(Number(offsetXSlider.value()).toFixed(0));
   select("#offsetYLabel").html(Number(offsetYSlider.value()).toFixed(0));
 }
+
 
 function resetExport() {
   exportMode = false;
