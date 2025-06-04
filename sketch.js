@@ -420,9 +420,16 @@ function getLFOValue(type, freq) {
   if (lfoPhase > 1) lfoPhase -= 1;
 
   switch (type) {
-    case "saw": return (lfoPhase * -2.0);
-    case "sin": return sin(TWO_PI * lfoPhase);
-    case "tri": return abs((lfoPhase * 4) - 2) - 1;
+    case "saw": return (lfoPhase * -2.0); // Assuming this goes from -1 to 1, with 0 as midpoint
+    case "sin":
+      {
+        const rawSine = sin(TWO_PI * lfoPhase);
+        // This is the part that makes it steeper at 0
+        // 'exponent' MUST be an odd integer (e.g., 3, 5, 7, ...)
+        const exponent = 3; // Or 5, 7, etc., for more pronounced steepness
+        return Math.pow(rawSine, exponent);
+      }
+    case "tri": return abs((lfoPhase * 4) - 2) - 1; // Assuming this goes from -1 to 1, with 0 as midpoint
     default: return 0;
   }
 }
@@ -504,6 +511,7 @@ function draw() {
     let currentOffsetY = Number(offsetYSlider.value()) + (lfoOffsetY.checked() ? lfo * 100 * lfoAmp : 0);
 
     // Pass all these calculated values as uniforms to the shader
+    theShader.setUniform('uCameraPosition', [0.0, 0.0, 0.0]);
     theShader.setUniform('uDepth', depth);
     theShader.setUniform('uShapeX', currentShapeXValue);
     theShader.setUniform('uShapeY', currentShapeYValue);
@@ -529,7 +537,7 @@ function draw() {
     // This creates a mesh with enough vertices for per-line Z-displacement
     // A higher density (lower stepSize) means more vertical subdivisions.
     let detailY = max(2, int(height / densitySlider.value())); // Number of vertical subdivisions
-    let detailX = max(2, int(width / 5)); // Increased horizontal detail for smoother displacement
+    let detailX = max(2, int(width / densitySlider.value())); // Increased horizontal detail for smoother displacement
 
     // Draw a highly subdivided plane to cover the entire graphics canvas
     graphics.plane(width, height, detailX, detailY);
