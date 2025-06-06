@@ -482,6 +482,16 @@ function draw() {
     theShader.setUniform('uTextureResolution', [src.width, src.height]);
     theShader.setUniform('uGamma', gammaValue);
 
+    // In sketch.js
+    theShader.setUniform('uTemporalStrength', 0.1); // Adjust as needed
+    theShader.setUniform('uTemporalDecay', 0.9);   // Adjust as needed
+    theShader.setUniform('uEdgeThreshold', 0.1);   // Adjust as needed
+    theShader.setUniform('uEdgeIntensity', 0.8);   // Adjust as needed
+    theShader.setUniform('uNormalEdgeStrength', 1.0); // Adjust as needed
+    theShader.setUniform('uDepthEdgeStrength', 0.5);  // Adjust as needed
+    theShader.setUniform('uDepthColorNear', [0.0, 0.5, 1.0]); // RGB values for near color
+    theShader.setUniform('uDepthColorFar', [1.0, 0.0, 0.5]);  // RGB values for far color
+
     // LFO calculations for uniforms
     let lfoFreq = Number(lfoFreqSlider.value());
     let lfoAmp = Number(lfoAmpSlider.value());
