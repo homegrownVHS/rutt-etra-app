@@ -69,6 +69,13 @@ let targetRotY = 0;
 let lfoPhase = 0; // For real-time LFO
 let lfoTypes = ['saw', 'sin', 'tri'];
 
+// Add these lines at the very top of your sketch.js file
+let finalDepthHistory = [];
+const finalDepthHistorySize = 50; // Tune this value (e.g., 5, 10, 20) for more/less smoothing
+
+// Also, if you plan to use text for the loading message, ensure your font is loaded:
+let myFont; // Global variable for the font
+
 // Download button variable
 let downloadBtn;
 
@@ -489,8 +496,6 @@ function draw() {
     theShader.setUniform('uEdgeIntensity', 0.8);   // Adjust as needed
     theShader.setUniform('uNormalEdgeStrength', 1.0); // Adjust as needed
     theShader.setUniform('uDepthEdgeStrength', 0.5);  // Adjust as needed
-    theShader.setUniform('uDepthColorNear', [0.0, 0.5, 1.0]); // RGB values for near color
-    theShader.setUniform('uDepthColorFar', [1.0, 0.0, 0.5]);  // RGB values for far color
 
     // LFO calculations for uniforms
     let lfoFreq = Number(lfoFreqSlider.value());
@@ -504,19 +509,37 @@ function draw() {
       lfo = getLFOValue(lfoType, lfoFreq);
     }
 
-    // --- Moving Average Filter for Depth Calculation ---
-    // Add the current depth slider value to the history
-    depthHistory.push(Number(depthSlider.value()));
-    // If history exceeds size, remove the oldest value
-    if (depthHistory.length > depthHistorySize) {
-      depthHistory.shift(); // Remove the first element
-    }
-    // Calculate the average of the depth history
-    let averagedBaseDepth = depthHistory.reduce((sum, val) => sum + val, 0) / depthHistory.length;
-    // --- End Moving Average Filter ---
+    // --- REVISED DEPTH CALCULATION WITH FINAL SMOOTHING AND THRESHOLD ---
+    // 1. Calculate the raw depth value (slider + LFO)
+    let rawDepth = Number(depthSlider.value()) + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
 
-    // Apply LFO to existing base values and pass as uniforms
-    let depth = averagedBaseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0); // Use averagedBaseDepth
+    // 2. Apply Moving Average Filter to this raw depth value
+    finalDepthHistory.push(rawDepth);
+    if (finalDepthHistory.length > finalDepthHistorySize) {
+      finalDepthHistory.shift();
+    }
+    let depth = finalDepthHistory.reduce((sum, val) => sum + val, 0) / finalDepthHistory.length;
+
+    // 3. Apply a minimum threshold to prevent it from ever being exactly zero when LFO is active
+    const MIN_ALLOWED_DEPTH = 0.01; // TUNE THIS VALUE! (e.g., 0.005, 0.02, 0.05)
+                                    // Make it small enough not to be visually noticeable as a non-zero,
+                                    // but large enough to keep the shader's edge detection active.
+
+    // This ensures that 'depth' has a minimum magnitude when the LFO is active
+    // OR when the slider is not explicitly 0.
+    if (!lfoDepth.checked() && Number(depthSlider.value()) === 0) {
+        // If LFO is OFF AND slider is exactly 0, allow depth to be 0
+        depth = 0;
+    } else {
+        // If LFO is ON OR slider is not 0, ensure a minimum magnitude.
+        // This prevents 'depth' from becoming exactly zero and disabling shader effects.
+        if (abs(depth) < MIN_ALLOWED_DEPTH) {
+            depth = (depth >= 0) ? MIN_ALLOWED_DEPTH : -MIN_ALLOWED_DEPTH;
+        }
+    }
+    // --- END REVISED DEPTH CALCULATION ---
+
+
     let tiltX = radians(Number(tiltXSlider.value())) + (lfoTiltX.checked() ? lfo * PI * lfoAmp : 0);
     let tiltY = radians(Number(tiltYSlider.value())) + (lfoTiltY.checked() ? lfo * PI * lfoAmp : 0);
     let scl = Number(scaleSlider.value()) + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
@@ -537,7 +560,7 @@ function draw() {
 
     // Pass all these calculated values as uniforms to the shader
     theShader.setUniform('uCameraPosition', [0.0, 0.0, 0.0]);
-    theShader.setUniform('uDepth', depth);
+    theShader.setUniform('uDepth', depth); // This is the final calculated depth value
     theShader.setUniform('uShapeX', currentShapeXValue);
     theShader.setUniform('uShapeY', currentShapeYValue);
     theShader.setUniform('uWaveAmp', currentWaveAmplitude);
@@ -559,10 +582,8 @@ function draw() {
     graphics.noStroke();
 
     // Calculate subdivisions for the plane based on density slider
-    // This creates a mesh with enough vertices for per-line Z-displacement
-    // A higher density (lower stepSize) means more vertical subdivisions.
-    let detailY = max(2, int(height / densitySlider.value())); // Number of vertical subdivisions
-    let detailX = max(2, int(width / densitySlider.value())); // Increased horizontal detail for smoother displacement
+    let detailY = max(2, int(height / densitySlider.value()));
+    let detailX = max(2, int(width / densitySlider.value()));
 
     // Draw a highly subdivided plane to cover the entire graphics canvas
     graphics.plane(width, height, detailX, detailY);
@@ -573,7 +594,10 @@ function draw() {
   image(graphics, -width / 2, -height / 2, width, height);
 
   // Update labels (these are still in JS)
-  select("#depthLabel").html(Number(depthSlider.value()).toFixed(0)); // This label still shows the raw slider value
+  // Note: The depth label now shows the *raw* slider value, not the smoothed/LFO value.
+  // If you want to show the actual `depth` value sent to the shader, you can do:
+  // select("#depthLabel").html(depth.toFixed(2));
+  select("#depthLabel").html(Number(depthSlider.value()).toFixed(0));
   select("#tiltXLabel").html((Number(tiltXSlider.value())).toFixed(0) + "°");
   select("#tiltYLabel").html(tiltYSlider.value() + "°");
   select("#scaleLabel").html(Number(scaleSlider.value()).toFixed(2));

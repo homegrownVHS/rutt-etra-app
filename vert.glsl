@@ -115,6 +115,8 @@ void main() {
     // Calculate normals by sampling neighboring points and computing cross products.
     // This provides a more accurate normal that accounts for Z-displacement.
     vec2 oneTexelNDC = 2.0 / uResolution; // Size of one pixel in NDC space
+    // NOTE: This normalSampleOffset is not actually used in the calculateZDisplacement calls below.
+    // It is declared but not applied to the texCoord for sampling z_x_plus etc.
     vec2 normalSampleOffset = oneTexelNDC * 5.0; // Adjust for smoother normal (like a blur for normals)
 
     // Calculate Z displacement at neighboring points
@@ -133,7 +135,6 @@ void main() {
 
     // Transform the calculated normal to view space
     vNormal = uNormalMatrix * calculatedNormal;
-
 
     // Final position transformation to clip space
     gl_Position = uProjectionMatrix * viewPos;
