@@ -19,8 +19,8 @@ uniform float uTemporalDecay; // How quickly the smear fades (0.0 - 1.0, 1.0 bei
 
 in vec2 vTexCoord;
 in float vProjectedY;
-in vec3 vPosition;        // Displaced position in View Space (interpolated)
-in vec3 vNormal;          // Normal of the displaced surface in View Space (interpolated)
+in vec3 vPosition;      // Displaced position in View Space (interpolated)
+in vec3 vNormal;         // Normal of the displaced surface in View Space (interpolated)
 in float vDisplacementZ; // The actual Z-offset applied (interpolated)
 
 out vec4 fragColor;
@@ -38,60 +38,64 @@ void main() {
     vec3 gammaCorrectedColor = applyGammaCorrection(sampledColor.rgb, uGamma);
 
     // --- Temporal Effects ---
-    vec2 temporalOffset = normalize(vNormal.xy) * uTemporalStrength * sin(uTime * 0.1);
-    vec4 temporalSample = texture(uSampler, vTexCoord + temporalOffset * 0.005);
+    // Normal.xy can be (0,0) for perfectly flat surface facing camera, normalize handles it
+    vec2 temporalOffsetDir = normalize(vNormal.xy);
+    // Avoid NaN if vNormal.xy is (0,0)
+    if (length(vNormal.xy) < 0.0001) temporalOffsetDir = vec2(0.0);
+
+    vec2 temporalOffset = temporalOffsetDir * uTemporalStrength * sin(uTime * 0.1);
+    vec4 temporalSample = texture(uSampler, vTexCoord + temporalOffset * 0.005); // Small texture offset
     vec3 temporalColor = applyGammaCorrection(temporalSample.rgb, uGamma);
     gammaCorrectedColor = mix(gammaCorrectedColor, temporalColor, uTemporalStrength * (1.0 - uTemporalDecay));
 
-    // --- Fresnel Effect ---
-    vec3 N = normalize(vNormal);
+    // --- Fresnel Effect and Enhanced Edge Detection ---
+    vec3 N = normalize(vNormal); // N is the interpolated normal from vertex shader
     vec3 V = normalize(uCameraPosition - vPosition);
 
-    float fresnel = dot(N, V);
-    fresnel = 1.0 - fresnel;
-    fresnel = pow(fresnel, 3.0);
+    // IMPORTANT FIX: Flip normal if rendering a back-face to ensure consistent lighting/shading
+    // This makes sure the normal always points OUTWARDS relative to the camera for lighting/fresnel.
+    if (!gl_FrontFacing) {
+        N = -N; // Flip normal if we are rendering a back-face
+    }
 
-    vec3 fresnelColor = vec3(0.8, 0.9, 1.0);
+    float fresnel = dot(N, V);
+    fresnel = 1.0 - abs(fresnel); // Using abs to make it symmetric for both front and back faces
+    fresnel = pow(fresnel, 3.0); // Power of 3.0 makes it sharper at edges
+
+    vec3 fresnelColor = vec3(0.8, 0.9, 1.0); // Light blue/white tint
     float fresnelIntensity = 0.6;
 
     gammaCorrectedColor += fresnelColor * fresnel * fresnelIntensity;
 
-    // --- Enhanced Edge Detection ---
     float normalEdge = 0.0;
     float depthEdge = 0.0;
 
-    // Normal-based edge calculation
-    float normalDotView = abs(dot(N, V));
-    normalEdge = 1.0 - smoothstep(uEdgeThreshold, uEdgeThreshold + 0.1, normalDotView);
+    // Normal-based edge calculation uses the potentially flipped N
+    float normalDotViewAngle = abs(dot(N, V)); // 1.0 is facing camera, 0.0 is edge-on
+    normalEdge = 1.0 - smoothstep(uEdgeThreshold, uEdgeThreshold + 0.1, normalDotViewAngle);
 
     // Depth-based edge calculation
-    // We can *always* perform these calculations. When uDepth is 0, vDisplacementZ will be 0,
-    // and the sampled depths will also be 0, so depthDifference will correctly be 0.
     vec2 texelSize = 1.0 / vec2(textureSize(uSampler, 0));
     float centerDepth = vDisplacementZ;
 
+    // Sample alpha channel as depth, and scale it based on uDepth as done in the vertex shader.
+    // The -0.5 * uDepth * 10.0 centers it as in the vertex shader.
     float d1 = texture(uSampler, vTexCoord + texelSize * vec2(1.0, 0.0)).a * uDepth * 10.0 - 0.5 * uDepth * 10.0;
     float d2 = texture(uSampler, vTexCoord + texelSize * vec2(-1.0, 0.0)).a * uDepth * 10.0 - 0.5 * uDepth * 10.0;
     float d3 = texture(uSampler, vTexCoord + texelSize * vec2(0.0, 1.0)).a * uDepth * 10.0 - 0.5 * uDepth * 10.0;
     float d4 = texture(uSampler, vTexCoord + texelSize * vec2(0.0, -1.0)).a * uDepth * 10.0 - 0.5 * uDepth * 10.0;
 
     float depthDifference = abs(centerDepth - d1) + abs(centerDepth - d2) + abs(centerDepth - d3) + abs(centerDepth - d4);
-    depthEdge = smoothstep(uEdgeThreshold * 0.1, uEdgeThreshold * 0.5, depthDifference);
+    depthEdge = smoothstep(uEdgeThreshold * 0.1, uEdgeThreshold * 0.5, depthDifference); // Use smaller range for depth threshold
 
     // Combine normal and depth edges
     float calculatedFinalEdge = max(normalEdge * uNormalEdgeStrength, depthEdge * uDepthEdgeStrength);
 
     // *** REVISED FIX FOR LFO CROSSING ZERO ***
     // We want a minimum edge effect when uDepth is very small.
-    // Instead of `if` or `max` with a smoothstep, let's use `mix` to blend.
-
     float baseEdgeStrength = 0.15; // TUNE THIS: Minimum edge strength when uDepth is near zero.
-                                  // Higher value = darker when flat.
+                                    // Higher value = darker when flat.
 
-    // This 'mix_factor' smoothly transitions from 1.0 (when abs(uDepth) is 0)
-    // down to 0.0 (when abs(uDepth) reaches minNonZeroDepth).
-    // TUNE `minNonZeroDepth`: The range over which the base edge fades out.
-    // If flash persists, try increasing this (e.g., 0.01, 0.05).
     float minNonZeroDepth = 0.02; // How far from zero uDepth must be before baseEdgeStrength fully disappears.
 
     // Use smoothstep for a smoother transition.
@@ -102,9 +106,8 @@ void main() {
     // When mix_factor is 0 (uDepth is > minNonZeroDepth), it's calculatedFinalEdge.
     float effectiveFinalEdge = mix(calculatedFinalEdge, baseEdgeStrength, mix_factor);
 
-
     // Apply edge effect by darkening the color
-    gammaCorrectedColor *= (1.0 - effectiveFinalEdge * uEdgeIntensity);
+    vec3 finalColor = mix(gammaCorrectedColor, vec3(0.0), effectiveFinalEdge * uEdgeIntensity);
 
 
     // --- Color shift based on Z depth ---
@@ -114,7 +117,6 @@ void main() {
     if (abs(uDepth) > 0.0001) { // Only calculate if uDepth is significantly non-zero
         float maxAbsZDisplacement = abs(uDepth) * 10.0;
         // Check for maxAbsZDisplacement being non-zero before division.
-        // This makes it more robust, though abs(uDepth) > 0.0001 already helps.
         if (maxAbsZDisplacement > 0.0001) {
             normalizedZ = (vDisplacementZ + maxAbsZDisplacement * 0.5) / maxAbsZDisplacement;
             normalizedZ = clamp(normalizedZ, 0.0, 1.0);
@@ -122,11 +124,11 @@ void main() {
     }
     // If you were using normalizedZ for a color shift, ensure that effect is smooth.
     // For example, if you have a color shift:
-    // gammaCorrectedColor.rgb = mix(gammaCorrectedColor.rgb, someColorBasedOnZ, someFactor);
+    // finalColor.rgb = mix(finalColor.rgb, someColorBasedOnZ, someFactor);
 
 
     // Final clamping to ensure colors are valid
-    gammaCorrectedColor = clamp(gammaCorrectedColor, 0.0, 1.0);
+    finalColor = clamp(finalColor, 0.0, 1.0);
 
-    fragColor = vec4(gammaCorrectedColor, sampledColor.a);
+    fragColor = vec4(finalColor, sampledColor.a);
 }

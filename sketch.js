@@ -89,6 +89,11 @@ function setup() {
   createCanvas(1280, 720, WEBGL);
   graphics = createGraphics(width, height, WEBGL); // Create a WEBGL graphics object
 
+  // IMPORTANT FIX: disableCull() must be called on the graphics object
+  // if you want to disable culling for the elements drawn to that graphics object.
+  // This ensures both sides of your displaced mesh are rendered.
+  graphics.drawingContext.disable(graphics.drawingContext.CULL_FACE); 
+
   // Apply the shader to the graphics object
   graphics.shader(theShader);
 
@@ -223,10 +228,18 @@ function setup() {
       camSelect.child(option);
     });
     selectedDeviceId = videoDevices[0]?.deviceId;
-    startCam(selectedDeviceId);
+    if (selectedDeviceId) { // Only try to start camera if a device exists
+      startCam(selectedDeviceId);
+    } else {
+      loadingMessage = "No camera devices found.";
+      isLoading = false;
+      currentSourceReady = false;
+    }
   }).catch(err => {
     console.error("Error enumerating media devices:", err);
     loadingMessage = "Camera access denied or no devices found.";
+    isLoading = false;
+    currentSourceReady = false;
   });
 
   camSelect.changed(() => {
@@ -253,6 +266,7 @@ function setup() {
   currentFrameLabel.html(currentFrameForExport);
 }
 
+// UPDATED: More robust webcam initialization
 function startCam(deviceId) {
   uploadedMedia = null;
   uploadedType = null;
@@ -261,28 +275,45 @@ function startCam(deviceId) {
   loadingMessage = "Starting camera...";
 
   if (cam) cam.remove(); // Remove existing camera
+  cam = null; // Ensure cam is null before creating new
+
+  // Create capture, passing error callback directly.
+  // We'll handle success (and setting currentSourceReady) via onloadedmetadata
   cam = createCapture({ video: { deviceId: { exact: deviceId } } },
-    (stream) => { // Success callback
-      cam.size(640, 480);
-      cam.hide();
-      currentSourceReady = true; // Camera is ready to be drawn
-      isLoading = false; // Clear loading state
-      loadingMessage = "";
-    },
-    (err) => { // Error callback
+    (err) => { // Error callback only
       console.error("Camera stream error:", err);
       currentSourceReady = false;
-      isLoading = false; // Clear loading state
+      isLoading = false;
       loadingMessage = `Camera error: ${err.name} - ${err.message}`;
       cam = null;
     }
   );
-  cam.elt.onloadedmetadata = () => { // Ensure dimensions are explicitly loaded for native element
-    currentSourceReady = true;
-    isLoading = false;
-    loadingMessage = "";
-  };
+
+  // This is the most reliable place to know when the camera feed is truly ready.
+  // Using cam.elt (the underlying HTML <video> element) is key.
+  if (cam && cam.elt) {
+      cam.elt.onloadedmetadata = () => {
+          console.log("Camera metadata loaded! Dimensions:", cam.width, "x", cam.height);
+          cam.size(640, 480); // Set size after metadata is available
+          cam.hide(); // Hide the HTML element
+          currentSourceReady = true; // Camera is ready to be drawn
+          isLoading = false; // Clear loading state
+          loadingMessage = "";
+      };
+      // Important: Check if metadata is already loaded (can happen if it's super fast)
+      // and manually trigger the onloadedmetadata handler if so.
+      if (cam.elt.readyState >= HTMLMediaElement.HAVE_METADATA) {
+          console.log("Camera metadata already loaded (fast path). Triggering onloadedmetadata.");
+          cam.elt.onloadedmetadata(); // Manually trigger it
+      }
+  } else {
+      console.error("Failed to create camera capture object (cam or cam.elt is null).");
+      isLoading = false;
+      loadingMessage = "Failed to access camera.";
+      currentSourceReady = false;
+  }
 }
+
 
 function handleImageUpload() {
   currentSourceReady = false; // Reset flag
@@ -427,7 +458,7 @@ function getLFOValue(type, freq) {
   if (lfoPhase > 1) lfoPhase -= 1;
 
   switch (type) {
-    case "saw": return (lfoPhase * -2.0); // Assuming this goes from -1 to 1, with 0 as midpoint
+    case "saw": return (lfoPhase * 2.0) - 1.0; // Goes from -1 to 1
     case "sin":
       {
         const rawSine = sin(TWO_PI * lfoPhase);
@@ -436,7 +467,7 @@ function getLFOValue(type, freq) {
         const exponent = 3; // Or 5, 7, etc., for more pronounced steepness
         return Math.pow(rawSine, exponent);
       }
-    case "tri": return abs((lfoPhase * 4) - 2) - 1; // Assuming this goes from -1 to 1, with 0 as midpoint
+    case "tri": return abs((lfoPhase * 4) - 2) - 1; // Goes from -1 to 1
     default: return 0;
   }
 }
@@ -448,15 +479,16 @@ function getLFOValueForExport(type, currentFrame, totalFrames) {
 
   switch (type) {
     case "saw": return (phase * 2.0) - 1.0;
-    case "sin": return sin(TWO_PI * lfoPhase);
+    case "sin": return sin(TWO_PI * phase); // Use 'phase' here for consistent export animation
     case "tri": return abs((phase * 4) - 2) - 1;
     default: return 0;
   }
 }
 
 // Global variables for the moving average filter (add these outside the draw function)
-let depthHistory = [];
-const depthHistorySize = 50; // Adjust this value to change the smoothing effect (e.g., 5, 10, 20)
+// NOTE: `finalDepthHistory` is already declared at the top of the file
+// let depthHistory = []; // This line is now redundant
+// const depthHistorySize = 50; // This line is now redundant
 
 function draw() {
   background(0); // Clear the main canvas
@@ -471,31 +503,31 @@ function draw() {
     fill(255);
     textSize(24);
     textAlign(CENTER, CENTER);
-    text(loadingMessage, 0, 0); // Display in the center of the canvas
+    // Draw text in the center of the canvas relative to its coordinate system
+    // For WEBGL, the center is (0,0,0)
+    text(loadingMessage, 0, 0);
     return;
   }
 
   // Clear the graphics buffer before drawing to it
   graphics.clear();
 
-  // Bind the source directly as a texture to the graphics object
-  graphics.texture(src);
-
   // Set uniforms for the shader
   if (theShader) {
     graphics.shader(theShader);
+    graphics.texture(src); // IMPORTANT: Bind the texture AFTER setting the shader
     theShader.setUniform('uSampler', src);
     theShader.setUniform('uResolution', [width, height]);
     theShader.setUniform('uTextureResolution', [src.width, src.height]);
     theShader.setUniform('uGamma', gammaValue);
 
-    // In sketch.js
-    theShader.setUniform('uTemporalStrength', 0.1); // Adjust as needed
-    theShader.setUniform('uTemporalDecay', 0.9);   // Adjust as needed
-    theShader.setUniform('uEdgeThreshold', 0.1);   // Adjust as needed
-    theShader.setUniform('uEdgeIntensity', 0.8);   // Adjust as needed
-    theShader.setUniform('uNormalEdgeStrength', 1.0); // Adjust as needed
-    theShader.setUniform('uDepthEdgeStrength', 0.5);  // Adjust as needed
+    // Initial values for new uniforms - feel free to make these sliders if desired
+    theShader.setUniform('uTemporalStrength', 0.1); // Controls the intensity of the temporal smear (0.0 - 1.0)
+    theShader.setUniform('uTemporalDecay', 0.9);   // How quickly the smear fades (0.0 - 1.0, 1.0 being no decay)
+    theShader.setUniform('uEdgeThreshold', 0.1);   // Controls the sensitivity/thickness of the edge (0.0 - 0.5)
+    theShader.setUniform('uEdgeIntensity', 0.8);   // Controls the darkness of the edge (0.0 - 1.0+)
+    theShader.setUniform('uNormalEdgeStrength', 1.0); // Strength of normal-based edge detection (0.0 - 1.0)
+    theShader.setUniform('uDepthEdgeStrength', 0.5);  // Strength of depth-based edge detection (0.0 - 1.0)
 
     // LFO calculations for uniforms
     let lfoFreq = Number(lfoFreqSlider.value());
@@ -533,8 +565,10 @@ function draw() {
     } else {
         // If LFO is ON OR slider is not 0, ensure a minimum magnitude.
         // This prevents 'depth' from becoming exactly zero and disabling shader effects.
-        if (abs(depth) < MIN_ALLOWED_DEPTH) {
+        if (abs(depth) < MIN_ALLOWED_DEPTH && abs(depth) > 0) { // Check abs(depth) > 0 to avoid -0
             depth = (depth >= 0) ? MIN_ALLOWED_DEPTH : -MIN_ALLOWED_DEPTH;
+        } else if (abs(depth) === 0 && lfoDepth.checked()) { // If it's literally 0 AND LFO is on
+             depth = MIN_ALLOWED_DEPTH; // Force a small non-zero value
         }
     }
     // --- END REVISED DEPTH CALCULATION ---
@@ -559,7 +593,7 @@ function draw() {
     let currentOffsetY = Number(offsetYSlider.value()) + (lfoOffsetY.checked() ? lfo * 100 * lfoAmp : 0);
 
     // Pass all these calculated values as uniforms to the shader
-    theShader.setUniform('uCameraPosition', [0.0, 0.0, 0.0]);
+    theShader.setUniform('uCameraPosition', [0.0, 0.0, 0.0]); // Camera is at origin in view space
     theShader.setUniform('uDepth', depth); // This is the final calculated depth value
     theShader.setUniform('uShapeX', currentShapeXValue);
     theShader.setUniform('uShapeY', currentShapeYValue);
@@ -624,7 +658,7 @@ function resetExport() {
 
 function startExport() {
   if (!currentSourceReady) {
-    console.warn("Source media not ready for export. Please upload an image or video first.");
+    console.warn("Source media not ready for export. Please upload an image or video first, or ensure camera is active.");
     return;
   }
 
@@ -652,7 +686,7 @@ function goToNextFrame() {
     currentFrameForExport++;
     currentFrameForExportInput.value = currentFrameForExport;
     currentFrameLabel.html(currentFrameForExport);
-    redraw();
+    redraw(); // Request a redraw for the next frame
   } else {
     console.log("Reached the last frame. Resetting export mode.");
     resetExport();
@@ -711,8 +745,11 @@ function handleCustomMIDIMessage(message) {
     let mapped = min + (val / 127) * (max - min);
     control.value(mapped);
   } else if (control.elt.type === 'checkbox') {
+    // Only toggle if the MIDI value is 'on' (e.g., button press)
     if (val > 0) {
         control.elt.checked = !control.elt.checked;
+        // Trigger input event to update display immediately if necessary
+        // control.elt.dispatchEvent(new Event('change')); // or 'input'
     }
   }
 }
