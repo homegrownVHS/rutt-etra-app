@@ -4,15 +4,18 @@ let stepSize = 6;
 
 // Shader variable
 let theShader;
-let graphics;     // p5.Graphics object for offscreen rendering with shader
+let graphics; // p5.Graphics object for offscreen rendering with shader
 
 // Loading state indicator
 let isLoading = false;
-let loadingMessage = "Loading media...";
+let loadingMessage = "Initializing..."; // Changed default message
+
+// NO FONT VARIABLE HERE
 
 function preload() {
   // Load the shaders
   theShader = loadShader('vert.glsl', 'frag.glsl');
+  // NO FONT LOADING HERE
 }
 
 // Existing sliders
@@ -49,7 +52,7 @@ let lfoHorizAmp, lfoVertAmp;
 let horizontalAmplification = 1.0;
 let verticalAmplification = 1.0;
 
-// NEW: Offset variables for the D-pad
+// Offset variables for the D-pad
 let offsetXSlider, offsetYSlider, offsetXLabel, offsetYLabel;
 let lfoOffsetX, lfoOffsetY;
 let offsetX = 0;
@@ -69,17 +72,14 @@ let targetRotY = 0;
 let lfoPhase = 0; // For real-time LFO
 let lfoTypes = ['saw', 'sin', 'tri'];
 
-// Add these lines at the very top of your sketch.js file
+// Moving average filter for depth smoothing
 let finalDepthHistory = [];
 const finalDepthHistorySize = 50; // Tune this value (e.g., 5, 10, 20) for more/less smoothing
-
-// Also, if you plan to use text for the loading message, ensure your font is loaded:
-let myFont; // Global variable for the font
 
 // Download button variable
 let downloadBtn;
 
-// NEW: Export automation variables
+// Export automation variables
 let currentFrameForExportInput, totalFramesForExportInput, startExportBtn, nextFrameBtn, currentFrameLabel;
 let currentFrameForExport = 0;
 let totalFramesForExport = 0;
@@ -89,14 +89,15 @@ function setup() {
   createCanvas(1280, 720, WEBGL);
   graphics = createGraphics(width, height, WEBGL); // Create a WEBGL graphics object
 
-  // IMPORTANT FIX: disableCull() must be called on the graphics object
-  // if you want to disable culling for the elements drawn to that graphics object.
-  // This ensures both sides of your displaced mesh are rendered.
-  graphics.drawingContext.disable(graphics.drawingContext.CULL_FACE); 
+  // IMPORTANT FIX: disableCull() must be called on the drawingContext of the graphics object
+  graphics.drawingContext.disable(graphics.drawingContext.CULL_FACE);
 
   // Apply the shader to the graphics object
   graphics.shader(theShader);
 
+  // NO FONT SETTING HERE textFont(myFont);
+
+  // --- UI Element Selections ---
   depthSlider = select("#depthSlider");
   tiltXSlider = select("#tiltXSlider");
   tiltYSlider = select("#tiltYSlider");
@@ -131,7 +132,6 @@ function setup() {
   gammaSlider = select("#gammaSlider");
   gammaLabel = select("#gammaLabel");
 
-  // Initialize new sliders and labels
   horizAmpSlider = select("#horizAmpSlider");
   horizAmpLabel = select("#horizAmpLabel");
   vertAmpSlider = select("#vertAmpSlider");
@@ -139,7 +139,6 @@ function setup() {
   lfoHorizAmp = select("#lfoHorizAmp");
   lfoVertAmp = select("#lfoVertAmp");
 
-  // NEW: Initialize offset sliders and labels
   offsetXSlider = select("#offsetXSlider");
   offsetYSlider = select("#offsetYSlider");
   offsetXLabel = select("#offsetXLabel");
@@ -147,35 +146,38 @@ function setup() {
   lfoOffsetX = select("#lfoOffsetX");
   lfoOffsetY = select("#lfoOffsetY");
 
-  // Initialize download button and add click listener
   downloadBtn = select("#downloadBtn");
   downloadBtn.mousePressed(saveImage);
 
-  // NEW: Initialize export controls
   currentFrameForExportInput = select("#currentFrameForExportInput"); // Hidden input
   totalFramesForExportInput = select("#totalFramesForExportInput");
   startExportBtn = select("#startExportBtn");
   startExportBtn.mousePressed(startExport);
-  nextFrameBtn = select("#nextFrameBtn"); // New button
-  nextFrameBtn.mousePressed(goToNextFrame); // New button handler
-  currentFrameLabel = select("#currentFrameLabel"); // New label
-
+  nextFrameBtn = select("#nextFrameBtn");
+  nextFrameBtn.mousePressed(goToNextFrame);
+  currentFrameLabel = select("#currentFrameLabel");
 
   let controlsDiv = select("#controls");
   controlsDiv.mouseOver(() => controlsHovering = true);
   controlsDiv.mouseOut(() => controlsHovering = false);
 
+  // --- Event Listeners for UI ---
   imgInput.changed(handleImageUpload);
   vidInput.changed(handleVideoUpload);
 
   // Add drag and drop functionality
-  let mainCanvas = select("main");
-  mainCanvas.dragOver(() => {
-    // Prevent default browser behavior for drag and drop
-    return false;
-  });
-  mainCanvas.drop(handleFileDrop);
-
+  let mainCanvas = select("main"); // Assuming your canvas is directly in <main> or has an ID
+  if (!mainCanvas) { // Fallback if <main> isn't directly selectable
+    mainCanvas = select("canvas"); // Try to select the canvas element directly
+  }
+  if (mainCanvas) {
+    mainCanvas.dragOver(() => {
+      return false; // Prevent default browser behavior
+    });
+    mainCanvas.drop(handleFileDrop);
+  } else {
+    console.warn("Could not find a canvas element for drag and drop. Make sure your canvas is in <main> or has a direct ID.");
+  }
 
   shapeXSlider.input(() => {
     shapeXValue = Number(shapeXSlider.value());
@@ -199,7 +201,6 @@ function setup() {
     gammaLabel.html(gammaValue.toFixed(1));
   });
 
-  // Input handlers for new sliders
   horizAmpSlider.input(() => {
     horizontalAmplification = Number(horizAmpSlider.value());
     horizAmpLabel.html(horizontalAmplification.toFixed(1));
@@ -209,7 +210,6 @@ function setup() {
     vertAmpLabel.html(verticalAmplification.toFixed(1));
   });
 
-  // NEW: Input handlers for offset sliders
   offsetXSlider.input(() => {
     offsetX = Number(offsetXSlider.value());
     offsetXLabel.html(offsetX.toFixed(0));
@@ -219,7 +219,7 @@ function setup() {
     offsetYLabel.html(offsetY.toFixed(0));
   });
 
-
+  // --- Camera Device Enumeration and Initial Start ---
   navigator.mediaDevices.enumerateDevices().then(devices => {
     const videoDevices = devices.filter(d => d.kind === 'videoinput');
     videoDevices.forEach((device, i) => {
@@ -244,29 +244,29 @@ function setup() {
 
   camSelect.changed(() => {
     selectedDeviceId = camSelect.value();
-    if (cam) cam.remove();
+    if (cam) cam.remove(); // Remove old camera before starting new one
     uploadedMedia = null; // Clear uploaded media if switching to camera
     uploadedType = null;
-    currentSourceReady = false; // Reset flag for new source
-    isLoading = true; // Set loading state
-    loadingMessage = "Starting camera...";
-    startCam(selectedDeviceId);
+    startCam(selectedDeviceId); // Start the selected camera
   });
 
   strokeWeight(1);
   noFill();
 
+  // --- MIDI Setup ---
   if (navigator.requestMIDIAccess) {
     navigator.requestMIDIAccess().then(onMIDISuccess).catch(err => {
       console.error("MIDI access denied:", err);
     });
   }
 
-  // Initialize current frame display
+  // Initialize current frame display for export
   currentFrameLabel.html(currentFrameForExport);
 }
 
-// UPDATED: More robust webcam initialization
+// --- Camera & Media Handling Functions ---
+
+// REVISED startCam function for maximum reliability, closer to minimal sketch but with error handling
 function startCam(deviceId) {
   uploadedMedia = null;
   uploadedType = null;
@@ -274,44 +274,63 @@ function startCam(deviceId) {
   isLoading = true; // Set loading state
   loadingMessage = "Starting camera...";
 
-  if (cam) cam.remove(); // Remove existing camera
-  cam = null; // Ensure cam is null before creating new
+  if (cam) {
+    cam.remove(); // Remove existing camera if any
+    cam = null;   // Ensure cam is null before creating new
+  }
 
-  // Create capture, passing error callback directly.
-  // We'll handle success (and setting currentSourceReady) via onloadedmetadata
-  cam = createCapture({ video: { deviceId: { exact: deviceId } } },
-    (err) => { // Error callback only
-      console.error("Camera stream error:", err);
-      currentSourceReady = false;
-      isLoading = false;
-      loadingMessage = `Camera error: ${err.name} - ${err.message}`;
-      cam = null;
+  // Use createCapture with a single options object.
+  // We will attach event listeners directly to cam.elt for robust state tracking.
+  // No success/error callbacks here, relying on cam.elt events.
+  cam = createCapture({
+    video: {
+      deviceId: { exact: deviceId },
+      width: 640,
+      height: 480
     }
-  );
+  });
 
-  // This is the most reliable place to know when the camera feed is truly ready.
-  // Using cam.elt (the underlying HTML <video> element) is key.
-  if (cam && cam.elt) {
+  // Give p5.js a very small moment to create the cam.elt before attaching listeners.
+  // This helps avoid cam.elt being null immediately after createCapture.
+  setTimeout(() => {
+    if (cam && cam.elt) {
+      cam.size(640, 480); // Ensure size is set
+      cam.hide(); // Hide the HTML element
+
+      // This is the most reliable way to know when the camera is ready to draw.
+      // The `loadedmetadata` event fires when the browser has loaded enough of the
+      // media to determine its dimensions and duration.
       cam.elt.onloadedmetadata = () => {
-          console.log("Camera metadata loaded! Dimensions:", cam.width, "x", cam.height);
-          cam.size(640, 480); // Set size after metadata is available
-          cam.hide(); // Hide the HTML element
-          currentSourceReady = true; // Camera is ready to be drawn
-          isLoading = false; // Clear loading state
+          console.log("DEBUG: Camera metadata loaded! Stream ready.");
+          currentSourceReady = true; // Set this true only when confirmed ready
+          isLoading = false;
           loadingMessage = "";
       };
-      // Important: Check if metadata is already loaded (can happen if it's super fast)
-      // and manually trigger the onloadedmetadata handler if so.
+
+      // General error handling for the underlying video element
+      cam.elt.onerror = (e) => {
+          console.error("DEBUG: Camera (HTML Video Element) error:", e);
+          currentSourceReady = false; // Camera definitively failed
+          isLoading = false;
+          loadingMessage = `Camera error: ${e.message || 'Unknown error'}. Check permissions and device.`;
+          if (cam) cam.remove(); // Clean up on error
+          cam = null;
+      };
+
+      // Important: Check if metadata is already loaded (can happen if it's very fast).
+      // If it's already ready, manually trigger the handler.
       if (cam.elt.readyState >= HTMLMediaElement.HAVE_METADATA) {
-          console.log("Camera metadata already loaded (fast path). Triggering onloadedmetadata.");
+          console.log("DEBUG: Camera metadata already loaded (fast path). Triggering onloadedmetadata.");
           cam.elt.onloadedmetadata(); // Manually trigger it
       }
-  } else {
-      console.error("Failed to create camera capture object (cam or cam.elt is null).");
+    } else {
+      // This catches cases where createCapture fails to even produce a cam.elt object
+      console.error("DEBUG: Failed to create camera capture object (cam or cam.elt is null after timeout).");
       isLoading = false;
-      loadingMessage = "Failed to access camera.";
       currentSourceReady = false;
-  }
+      loadingMessage = "Failed to access camera.";
+    }
+  }, 50); // Reduced timeout slightly. It just needs to let the p5.js internal creation run.
 }
 
 
@@ -335,7 +354,7 @@ function handleImageUpload() {
       isLoading = false; // Clear loading state
       loadingMessage = "";
     }, (event) => { // Error callback for loadImage
-      console.error("Error loading image:", event);
+      console.error("DEBUG: Error loading image:", event);
       currentSourceReady = false;
       isLoading = false; // Clear loading state
       loadingMessage = `Image load error: ${event}`;
@@ -360,13 +379,31 @@ function handleVideoUpload() {
     let file = vidInput.elt.files[0];
     let vid = createVideo([URL.createObjectURL(file)]);
 
-    // Crucial: Wait for the video's metadata to be loaded
     vid.elt.onloadedmetadata = () => {
       vid.size(640, 480); // Set size after metadata is available
       vid.hide();
       vid.loop();
       vid.volume(0);
-      vid.play(); // Explicitly play the video
+
+      // --- REVISED: Safe play attempt for video ---
+      const playPromise = vid.elt.play(); // .play() returns a Promise
+      if (playPromise !== undefined) {
+          playPromise.then(() => {
+              // Autoplay started!
+              console.log("DEBUG: Video autoplay started successfully.");
+          }).catch(error => {
+              // Autoplay was prevented (e.g., by browser policy).
+              console.warn("DEBUG: Video autoplay prevented:", error.name, error.message);
+              // You might want to display a UI element (e.g., a "Play" button) here
+              // so the user can manually initiate playback.
+          });
+      } else {
+          // If play() doesn't return a Promise (older browser/environment)
+          console.warn("DEBUG: vid.elt.play() did not return a Promise. Attempting direct play.");
+          vid.elt.play(); // Just try to play it
+      }
+      // --- END REVISED play attempt ---
+
       uploadedMedia = vid;
       uploadedType = 'video';
       currentSourceReady = true; // Video is now fully loaded and ready
@@ -375,7 +412,7 @@ function handleVideoUpload() {
     };
 
     vid.elt.onerror = (e) => { // Basic error handling for video
-      console.error("Video loading error:", e);
+      console.error("DEBUG: Video loading error:", e);
       currentSourceReady = false;
       isLoading = false; // Clear loading state
       loadingMessage = `Video load error: ${e.message || e}`;
@@ -408,7 +445,7 @@ function handleFileDrop(file) {
       isLoading = false;
       loadingMessage = "";
     }, (event) => {
-      console.error("Error loading dropped image:", event);
+      console.error("DEBUG: Error loading dropped image:", event);
       currentSourceReady = false;
       isLoading = false;
       loadingMessage = `Dropped image error: ${event}`;
@@ -420,7 +457,21 @@ function handleFileDrop(file) {
       vid.hide();
       vid.loop();
       vid.volume(0);
-      vid.play(); // Explicitly play the video
+
+      // --- REVISED: Safe play attempt for dropped video ---
+      const playPromise = vid.elt.play();
+      if (playPromise !== undefined) {
+          playPromise.then(() => {
+              console.log("DEBUG: Dropped video autoplay started successfully.");
+          }).catch(error => {
+              console.warn("DEBUG: Dropped video autoplay prevented:", error.name, error.message);
+          });
+      } else {
+          console.warn("DEBUG: vid.elt.play() did not return a Promise for dropped video. Attempting direct play.");
+          vid.elt.play();
+      }
+      // --- END REVISED play attempt ---
+
       uploadedMedia = vid;
       uploadedType = 'video';
       currentSourceReady = true;
@@ -429,7 +480,7 @@ function handleFileDrop(file) {
     };
 
     vid.elt.onerror = (e) => {
-      console.error("Video loading error from drop:", e);
+      console.error("DEBUG: Video loading error from drop:", e);
       currentSourceReady = false;
       isLoading = false;
       loadingMessage = `Dropped video error: ${e.message || e}`;
@@ -440,7 +491,7 @@ function handleFileDrop(file) {
   } else {
     isLoading = false;
     loadingMessage = "Unsupported file type dropped.";
-    console.warn("Unsupported file type dropped:", file.type);
+    console.warn("DEBUG: Unsupported file type dropped:", file.type);
   }
 }
 
@@ -453,6 +504,7 @@ function saveImage() {
   }
 }
 
+// --- LFO Functions ---
 function getLFOValue(type, freq) {
   lfoPhase += freq * 0.01;
   if (lfoPhase > 1) lfoPhase -= 1;
@@ -462,9 +514,7 @@ function getLFOValue(type, freq) {
     case "sin":
       {
         const rawSine = sin(TWO_PI * lfoPhase);
-        // This is the part that makes it steeper at 0
-        // 'exponent' MUST be an odd integer (e.g., 3, 5, 7, ...)
-        const exponent = 3; // Or 5, 7, etc., for more pronounced steepness
+        const exponent = 3; // For steeper curve at 0
         return Math.pow(rawSine, exponent);
       }
     case "tri": return abs((lfoPhase * 4) - 2) - 1; // Goes from -1 to 1
@@ -479,33 +529,33 @@ function getLFOValueForExport(type, currentFrame, totalFrames) {
 
   switch (type) {
     case "saw": return (phase * 2.0) - 1.0;
-    case "sin": return sin(TWO_PI * phase); // Use 'phase' here for consistent export animation
+    case "sin":
+      {
+        const rawSine = sin(TWO_PI * phase);
+        const exponent = 3;
+        return Math.pow(rawSine, exponent);
+      }
     case "tri": return abs((phase * 4) - 2) - 1;
     default: return 0;
   }
 }
 
-// Global variables for the moving average filter (add these outside the draw function)
-// NOTE: `finalDepthHistory` is already declared at the top of the file
-// let depthHistory = []; // This line is now redundant
-// const depthHistorySize = 50; // This line is now redundant
-
+// --- Main Drawing Loop ---
 function draw() {
   background(0); // Clear the main canvas
 
   let src = null;
+  // Check if currentSourceReady is true BEFORE attempting to use src
   if (uploadedMedia && uploadedType === 'image' && currentSourceReady) src = uploadedMedia;
   else if (uploadedMedia && uploadedType === 'video' && currentSourceReady) src = uploadedMedia;
-  else if (cam && currentSourceReady) src = cam;
+  else if (cam && currentSourceReady) src = cam; // Only use cam if currentSourceReady is true
 
   if (!src || !src.width || !src.height || isLoading) {
     // Display loading message if media is not ready or still loading
     fill(255);
-    textSize(24);
+    textSize(24); // Size of the text (will use default p5 font if textFont not set)
     textAlign(CENTER, CENTER);
-    // Draw text in the center of the canvas relative to its coordinate system
-    // For WEBGL, the center is (0,0,0)
-    text(loadingMessage, 0, 0);
+    text(loadingMessage, 0, 0); // For WEBGL, (0,0) is center
     return;
   }
 
@@ -522,12 +572,12 @@ function draw() {
     theShader.setUniform('uGamma', gammaValue);
 
     // Initial values for new uniforms - feel free to make these sliders if desired
-    theShader.setUniform('uTemporalStrength', 0.1); // Controls the intensity of the temporal smear (0.0 - 1.0)
-    theShader.setUniform('uTemporalDecay', 0.9);   // How quickly the smear fades (0.0 - 1.0, 1.0 being no decay)
-    theShader.setUniform('uEdgeThreshold', 0.1);   // Controls the sensitivity/thickness of the edge (0.0 - 0.5)
-    theShader.setUniform('uEdgeIntensity', 0.8);   // Controls the darkness of the edge (0.0 - 1.0+)
-    theShader.setUniform('uNormalEdgeStrength', 1.0); // Strength of normal-based edge detection (0.0 - 1.0)
-    theShader.setUniform('uDepthEdgeStrength', 0.5);  // Strength of depth-based edge detection (0.0 - 1.0)
+    theShader.setUniform('uTemporalStrength', 0.1);
+    theShader.setUniform('uTemporalDecay', 0.9);
+    theShader.setUniform('uEdgeThreshold', 0.1);
+    theShader.setUniform('uEdgeIntensity', 0.8);
+    theShader.setUniform('uNormalEdgeStrength', 1.0);
+    theShader.setUniform('uDepthEdgeStrength', 0.5);
 
     // LFO calculations for uniforms
     let lfoFreq = Number(lfoFreqSlider.value());
@@ -542,37 +592,25 @@ function draw() {
     }
 
     // --- REVISED DEPTH CALCULATION WITH FINAL SMOOTHING AND THRESHOLD ---
-    // 1. Calculate the raw depth value (slider + LFO)
     let rawDepth = Number(depthSlider.value()) + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
 
-    // 2. Apply Moving Average Filter to this raw depth value
     finalDepthHistory.push(rawDepth);
     if (finalDepthHistory.length > finalDepthHistorySize) {
       finalDepthHistory.shift();
     }
     let depth = finalDepthHistory.reduce((sum, val) => sum + val, 0) / finalDepthHistory.length;
 
-    // 3. Apply a minimum threshold to prevent it from ever being exactly zero when LFO is active
-    const MIN_ALLOWED_DEPTH = 0.01; // TUNE THIS VALUE! (e.g., 0.005, 0.02, 0.05)
-                                    // Make it small enough not to be visually noticeable as a non-zero,
-                                    // but large enough to keep the shader's edge detection active.
-
-    // This ensures that 'depth' has a minimum magnitude when the LFO is active
-    // OR when the slider is not explicitly 0.
+    const MIN_ALLOWED_DEPTH_MAGNITUDE = 0.01;
     if (!lfoDepth.checked() && Number(depthSlider.value()) === 0) {
-        // If LFO is OFF AND slider is exactly 0, allow depth to be 0
         depth = 0;
     } else {
-        // If LFO is ON OR slider is not 0, ensure a minimum magnitude.
-        // This prevents 'depth' from becoming exactly zero and disabling shader effects.
-        if (abs(depth) < MIN_ALLOWED_DEPTH && abs(depth) > 0) { // Check abs(depth) > 0 to avoid -0
-            depth = (depth >= 0) ? MIN_ALLOWED_DEPTH : -MIN_ALLOWED_DEPTH;
-        } else if (abs(depth) === 0 && lfoDepth.checked()) { // If it's literally 0 AND LFO is on
-             depth = MIN_ALLOWED_DEPTH; // Force a small non-zero value
+        if (abs(depth) < MIN_ALLOWED_DEPTH_MAGNITUDE && abs(depth) > 0) {
+            depth = (depth >= 0) ? MIN_ALLOWED_DEPTH_MAGNITUDE : -MIN_ALLOWED_DEPTH_MAGNITUDE;
+        } else if (abs(depth) === 0 && lfoDepth.checked()) {
+             depth = MIN_ALLOWED_DEPTH_MAGNITUDE;
         }
     }
     // --- END REVISED DEPTH CALCULATION ---
-
 
     let tiltX = radians(Number(tiltXSlider.value())) + (lfoTiltX.checked() ? lfo * PI * lfoAmp : 0);
     let tiltY = radians(Number(tiltYSlider.value())) + (lfoTiltY.checked() ? lfo * PI * lfoAmp : 0);
@@ -592,9 +630,8 @@ function draw() {
     let currentOffsetX = Number(offsetXSlider.value()) + (lfoOffsetX.checked() ? lfo * 100 * lfoAmp : 0);
     let currentOffsetY = Number(offsetYSlider.value()) + (lfoOffsetY.checked() ? lfo * 100 * lfoAmp : 0);
 
-    // Pass all these calculated values as uniforms to the shader
     theShader.setUniform('uCameraPosition', [0.0, 0.0, 0.0]); // Camera is at origin in view space
-    theShader.setUniform('uDepth', depth); // This is the final calculated depth value
+    theShader.setUniform('uDepth', depth);
     theShader.setUniform('uShapeX', currentShapeXValue);
     theShader.setUniform('uShapeY', currentShapeYValue);
     theShader.setUniform('uWaveAmp', currentWaveAmplitude);
@@ -627,10 +664,7 @@ function draw() {
   // Render the graphics object to the main canvas
   image(graphics, -width / 2, -height / 2, width, height);
 
-  // Update labels (these are still in JS)
-  // Note: The depth label now shows the *raw* slider value, not the smoothed/LFO value.
-  // If you want to show the actual `depth` value sent to the shader, you can do:
-  // select("#depthLabel").html(depth.toFixed(2));
+  // Update UI Labels
   select("#depthLabel").html(Number(depthSlider.value()).toFixed(0));
   select("#tiltXLabel").html((Number(tiltXSlider.value())).toFixed(0) + "°");
   select("#tiltYLabel").html(tiltYSlider.value() + "°");
@@ -648,6 +682,7 @@ function draw() {
 }
 
 
+// --- Export Automation Functions ---
 function resetExport() {
   exportMode = false;
   currentFrameForExport = 0;
@@ -693,6 +728,7 @@ function goToNextFrame() {
   }
 }
 
+// --- MIDI Functions ---
 function onMIDISuccess(midiAccess) {
   for (let input of midiAccess.inputs.values()) {
     input.onmidimessage = handleCustomMIDIMessage;
@@ -748,8 +784,6 @@ function handleCustomMIDIMessage(message) {
     // Only toggle if the MIDI value is 'on' (e.g., button press)
     if (val > 0) {
         control.elt.checked = !control.elt.checked;
-        // Trigger input event to update display immediately if necessary
-        // control.elt.dispatchEvent(new Event('change')); // or 'input'
     }
   }
 }
