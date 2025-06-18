@@ -93,7 +93,7 @@ void main() {
 
     // *** REVISED FIX FOR LFO CROSSING ZERO ***
     // We want a minimum edge effect when uDepth is very small.
-    float baseEdgeStrength = 0.15; // TUNE THIS: Minimum edge strength when uDepth is near zero.
+    float baseEdgeStrength = 0.35; // TUNE THIS: Minimum edge strength when uDepth is near zero.
                                     // Higher value = darker when flat.
 
     float minNonZeroDepth = 0.02; // How far from zero uDepth must be before baseEdgeStrength fully disappears.
