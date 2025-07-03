@@ -10,17 +10,16 @@ const sequenceManager = (() => {
     let currentSequenceIndex = 0; // Added for tracking current step in the sequence
     let currentAnimatedValues = {}; // Store the interpolated values for the current frame
 
-    // The easing function. It's good to have this locally or ensure it's globally available.
-    // For consistency, let's include it here.
-    function easing(t) {
-        return t < 0.5 ? 16 * t * t * t * t * t : 1 - pow(-2 * t + 2, 5) / 2;
+    // The easing function. This will now be a linear function.
+    // We'll keep the name 'easing' for consistency, but its behavior is linear.
+    function linearInterpolationFunction(t) {
+        return t; // For linear interpolation, the progress 't' is returned as is.
     }
 
     // Function to calculate interpolated value
-    function interpolate(startValue, endValue, progress, easeFn) {
-        if (easeFn) {
-            progress = easeFn(progress);
-        }
+    // This function will now always perform linear interpolation for segmentProgress.
+    function interpolate(startValue, endValue, progress) { // Removed easeFn parameter
+        // The progress itself is what we need for linear interpolation
         return startValue + (endValue - startValue) * progress;
     }
 
@@ -98,10 +97,8 @@ const sequenceManager = (() => {
                     let startValue = currentStep[key];
                     let endValue = nextStep[key] !== undefined ? nextStep[key] : startValue; // Use startValue if endValue is missing
 
-                    // Check if a custom easing function is defined for this segment
-                    let stepEasing = currentStep.easing && typeof currentStep.easing === 'function' ? currentStep.easing : easing;
-
-                    currentAnimatedValues[key] = interpolate(startValue, endValue, segmentProgress, stepEasing);
+                    // Directly use the segmentProgress for linear interpolation
+                    currentAnimatedValues[key] = interpolate(startValue, endValue, segmentProgress);
                 }
             }
         } else {

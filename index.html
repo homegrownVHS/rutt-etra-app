@@ -25,7 +25,7 @@
       max-width: 1280px;
       width: 98vw;
     }
-    #row1, #row2 {
+    #row1, #row2, #row3 { /* Added #row3 for new shader controls */
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
@@ -33,6 +33,7 @@
       background: rgba(0, 0, 0, 0.7);
       padding: 15px;
       border-radius: 8px;
+      margin-bottom: 10px; /* Add some space between rows */
     }
     .control-group {
       display: flex;
@@ -46,7 +47,8 @@
     input[type="range"],
     select,
     input[type="color"],
-    input[type="file"] {
+    input[type="file"],
+    input[type="number"] { /* Added number type */
       width: 100%;
     }
     input[type="file"] {
@@ -68,6 +70,12 @@
     }
     button:hover {
       background: #666;
+    }
+    h3 {
+      width: 100%;
+      text-align: center;
+      margin-bottom: 5px;
+      color: #eee;
     }
   </style>
 </head>
@@ -206,13 +214,68 @@
         <button id="nextFrameBtn">Next Frame</button>
         <label>Current Frame: <span id="currentFrameLabel">0</span></label>
       </div>
+      
+      <div class="control-group">
+        <button id="sequenceToggleButton">Start Sequence</button>
+      </div>
 
       <input type="hidden" id="currentFrameForExportInput" value="0">
-
     </div>
+
+    <div id="row3"> <h3>Shader Post-Processing</h3>
+      <div class="control-group">
+          <label for="blurRadiusSlider">Blur Radius: <span id="blurRadiusLabel">0.5</span></label>
+          <input type="range" id="blurRadiusSlider" min="0" max="10.0" step="0.1" value="0.5">
+      </div>
+      <div class="control-group">
+          <label for="temporalStrengthSlider">Temporal Strength: <span id="temporalStrengthLabel">0.10</span></label>
+          <input type="range" id="temporalStrengthSlider" min="0.0" max="1.0" step="0.01" value="0.1">
+      </div>
+      <div class="control-group">
+          <label for="temporalDecaySlider">Temporal Decay: <span id="temporalDecayLabel">0.90</span></label>
+          <input type="range" id="temporalDecaySlider" min="0.0" max="1.0" step="0.01" value="0.9">
+      </div>
+      <div class="control-group">
+          <label for="edgeThresholdSlider">Edge Threshold: <span id="edgeThresholdLabel">0.10</span></label>
+          <input type="range" id="edgeThresholdSlider" min="0.0" max="1.0" step="0.01" value="0.1">
+      </div>
+      <div class="control-group">
+          <label for="edgeIntensitySlider">Edge Intensity: <span id="edgeIntensityLabel">0.8</span></label>
+          <input type="range" id="edgeIntensitySlider" min="0.0" max="5.0" step="0.1" value="0.8">
+      </div>
+      <div class="control-group">
+          <label for="normalEdgeStrengthSlider">Normal Edge Strength: <span id="normalEdgeStrengthLabel">1.0</span></label>
+          <input type="range" id="normalEdgeStrengthSlider" min="0.0" max="2.0" step="0.1" value="1.0">
+      </div>
+      <div class="control-group">
+          <label for="depthEdgeStrengthSlider">Depth Edge Strength: <span id="depthEdgeStrengthLabel">0.5</span></label>
+          <input type="range" id="depthEdgeStrengthSlider" min="0.0" max="2.0" step="0.1" value="0.5">
+      </div>
+    </div>
+
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script type="x-shader/x-vertex" id="vertShader">
+    // You typically link to external .glsl files, but if embedded, content goes here.
+    // Example: #version 300 es (if using WebGL2)
+    // precision highp float;
+    // in vec3 aPosition;
+    // in vec2 aTexCoord;
+    // out vec2 vTexCoord;
+    // void main() {
+    //   vTexCoord = aTexCoord;
+    //   gl_Position = vec4(aPosition, 1.0);
+    // }
+    // You load them via loadShader('vert.glsl', 'frag.glsl') in p5.js
+  </script>
+  <script type="x-shader/x-fragment" id="fragShader">
+    // Similarly for fragment shader
+  </script>
+
+  <script src="sequenceData.js"></script>
+  <script src="sequenceManager.js"></script>
   <script src="sketch.js"></script>
+
 </body>
 </html>
