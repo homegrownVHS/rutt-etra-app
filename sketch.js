@@ -180,9 +180,47 @@ function setup() {
   // NEW: Sequence Button Setup - CORRECTED FUNCTION NAME HERE
   sequenceToggleButton = select("#sequenceToggleButton");
   sequenceToggleButton.mousePressed(() => {
-    // Corrected from sequenceManager.togglePlay() to sequenceManager.toggleSequence()
-    const isPlaying = sequenceManager.toggleSequence();
+    const isPlaying = sequenceManager.toggleSequence(); // Toggle the sequence manager
     sequenceToggleButton.html(isPlaying ? 'Stop Sequence' : 'Start Sequence');
+
+    // --- NEW VIDEO RESTART LOGIC ---
+    if (isPlaying) { // If the sequence *just started* playing
+      if (uploadedMedia && uploadedType === 'video') {
+        uploadedMedia.time(0); // Rewind video to the beginning
+        // Attempt to play the video. Handle potential autoplay policy issues.
+        const playPromise = uploadedMedia.elt.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log("DEBUG: Uploaded video re-started successfully with sequence.");
+          }).catch(error => {
+            console.warn("DEBUG: Uploaded video re-start prevented:", error.name, error.message);
+            // Consider adding a user-facing message here if autoplay fails
+          });
+        } else {
+          console.warn("DEBUG: uploadedMedia.elt.play() did not return a Promise. Attempting direct play.");
+          uploadedMedia.elt.play();
+        }
+      } else if (cam && uploadedType === 'camera') {
+        // If a camera is active and the sequence starts, ensure it's playing if it somehow paused.
+        // Live camera streams don't 'rewind'.
+        console.log("DEBUG: Sequence started, camera active. No rewind needed for live stream.");
+        // If 'cam' is a p5.MediaElement (like from createCapture), you might call play()
+        // if it could have been paused for any reason.
+        // cam.play(); // Uncomment if your camera sometimes pauses
+      }
+    } else {
+      // If the sequence just *stopped* playing, you might want to pause the video too
+      if (uploadedMedia && uploadedType === 'video') {
+        uploadedMedia.pause();
+        console.log("DEBUG: Uploaded video paused with sequence stop.");
+      }
+      // You could also stop the camera here if desired, but usually it keeps running.
+      // if (cam && uploadedType === 'camera') {
+      //   // cam.stop(); // Uncomment if you want to stop camera stream when sequence stops
+      // }
+    }
+    // --- END NEW VIDEO RESTART LOGIC ---
+
     // Optionally update UI elements here if sequence overrides them
     // (e.g., reset LFO checkboxes)
     lfoDepth.checked(false); // Make sure LFOs are off when sequence starts

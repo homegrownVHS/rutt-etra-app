@@ -19,7 +19,7 @@ uniform float uTemporalDecay; // How quickly the smear fades (0.0 - 1.0, 1.0 bei
 
 in vec2 vTexCoord;
 in float vProjectedY;
-in vec3 vPosition;      // Displaced position in View Space (interpolated)
+in vec3 vPosition;       // Displaced position in View Space (interpolated)
 in vec3 vNormal;         // Normal of the displaced surface in View Space (interpolated)
 in float vDisplacementZ; // The actual Z-offset applied (interpolated)
 
@@ -35,6 +35,13 @@ float getLuminosity(vec3 color) {
 
 void main() {
     vec4 sampledColor = texture(uSampler, vTexCoord);
+
+    // --- CRUCIAL ADDITION: Discard fragment if fully transparent ---
+    // This ensures no effects are applied to completely invisible parts of the texture.
+    if (sampledColor.a < 0.001) { // Using a small epsilon to catch near-zero alpha
+        discard;
+    }
+
     vec3 gammaCorrectedColor = applyGammaCorrection(sampledColor.rgb, uGamma);
 
     // --- Temporal Effects ---
@@ -130,5 +137,6 @@ void main() {
     // Final clamping to ensure colors are valid
     finalColor = clamp(finalColor, 0.0, 1.0);
 
+    // Output the final color with the original alpha
     fragColor = vec4(finalColor, sampledColor.a);
 }
