@@ -2,58 +2,55 @@
 let cam, uploadedMedia, uploadedType = null;
 let stepSize = 6;
 
-// Shader variable
+// Shader variables
 let theShader;
-let graphics; // p5.Graphics object for offscreen rendering with shader
+let graphics; // p5.Graphics object for offscreen rendering with the main shader
 
 // Loading state indicator
 let isLoading = false;
 let loadingMessage = "Initializing...";
 
-// Existing sliders (global declaration)
+// UI element variables (global declarations)
 let depthSlider, tiltXSlider, tiltYSlider, scaleSlider, densitySlider;
 let camSelect, imgInput, vidInput;
 
-// Existing LFO controls (global declaration)
+// LFO controls (global declarations)
 let lfoDepth, lfoTiltX, lfoTiltY, lfoScale, lfoFreqSlider, lfoAmpSlider, lfoTypeSelector;
 
-// LFO checkboxes for Shape and Wave effects (global declaration)
+// LFO checkboxes for Shape and Wave effects (global declarations)
 let lfoShapeX, lfoShapeY, lfoWaveAmp, lfoWaveFreq;
 
-// Variables for Shape and Wave Displacement effects (global declaration)
-// These now will be overridden by sequence or populated by sliders
-let shapeXValue = 0; // Will be set in draw
-let shapeYValue = 0; // Will be set in draw
-let waveAmplitude = 0; // Will be set in draw
-let waveFrequency = 0; // Will be set in draw
+// Variables for Shape and Wave Displacement effects
+let shapeXValue = 0;
+let shapeYValue = 0;
+let waveAmplitude = 0;
+let waveFrequency = 0;
 
-// Gamma Correction variable (global declaration)
+// Gamma Correction variable
 let gammaValue = 2.2;
 
-// Sliders and labels for Shape and Wave Displacement (global declaration)
+// Sliders and labels for Shape and Wave Displacement
 let shapeXSlider, shapeYSlider, shapeXLabel, shapeYLabel;
 let waveAmpSlider, waveAmpLabel;
 let waveFreqSlider, waveFreqLabel;
 
-// Gamma Slider and Label (global declaration)
+// Gamma Slider and Label
 let gammaSlider, gammaLabel;
 
-// Ramp Amplification variables (global declaration)
+// Ramp Amplification variables
 let horizAmpSlider, horizAmpLabel;
 let vertAmpSlider, vertAmpLabel;
 let lfoHorizAmp, lfoVertAmp;
-// These now will be overridden by sequence or populated by sliders
-let horizontalAmplification = 1.0; // Will be set in draw
-let verticalAmplification = 1.0; // Will be set in draw
+let horizontalAmplification = 1.0;
+let verticalAmplification = 1.0;
 
-// Offset variables for the D-pad (global declaration)
+// Offset variables for the D-pad
 let offsetXSlider, offsetYSlider, offsetXLabel, offsetYLabel;
 let lfoOffsetX, lfoOffsetY;
-// These now will be overridden by sequence or populated by sliders
-let offsetX = 0; // Will be set in draw
-let offsetY = 0; // Will be set in draw
+let offsetX = 0;
+let offsetY = 0;
 
-// New / Connected Sliders for Shader Uniforms (Global Declaration)
+// New / Connected Sliders for Shader Uniforms
 let blurRadiusSlider, blurRadiusLabel;
 let edgeThresholdSlider, edgeThresholdLabel;
 let edgeIntensitySlider, edgeIntensityLabel;
@@ -85,23 +82,58 @@ let currentFrameForExport = 0;
 let totalFramesForExport = 0;
 let exportMode = false; // Flag to indicate if we are in export mode
 
-// NEW: Global variable for the sequence toggle button
+// Global variables for shader source content (strings, loaded in preload)
+let blurVertSource;
+let horizontalBlurFragSource;
+let verticalBlurFragSource;
+
+// Shader objects created from the source strings (compiled in setup)
+let blurShaderHorizontal; 
+let blurShaderVertical;   
+
+let blurFBO; // Single FBO for intermediate blur pass
+
+// Global variable for the sequence toggle button
 let sequenceToggleButton;
 
 
 function preload() {
-  // Load the shaders
-  theShader = loadShader('vert.glsl', 'frag.glsl');
+  // Load the main Rutt-Etra shader (this is a vertex and fragment shader pair)
+  theShader = loadShader('vert.glsl', 'frag.glsl'); 
+
+  // Load the *content* of the individual blur shader files as strings.
+  // We use loadStrings() because these are individual components that
+  // will be compiled together into new shader programs in setup().
+  blurVertSource = loadStrings('blur.vert'); 
+  horizontalBlurFragSource = loadStrings('horizontal_blur.frag'); 
+  verticalBlurFragSource = loadStrings('vertical_blur.frag');   
 }
+
 
 function setup() {
   createCanvas(1280, 720, WEBGL);
-  graphics = createGraphics(width, height, WEBGL);
+  pixelDensity(1); // Good practice for consistent shader behavior
 
+  // Create p5.Graphics objects for offscreen rendering.
+  // These will act as Framebuffer Objects (FBOs) for multi-pass rendering.
+  graphics = createGraphics(width, height, WEBGL);
+  // Disable back-face culling for 3D rendering in graphics buffer if needed.
   graphics.drawingContext.disable(graphics.drawingContext.CULL_FACE);
-  graphics.shader(theShader);
+  
+  // Initialize blurFBO for the intermediate blur pass.
+  blurFBO = createGraphics(width, height, WEBGL);
+  // Disable culling for the blur FBO as well.
+  // FIX: Changed 'blurFadingContext' to 'blurFBO.drawingContext'
+  blurFBO.drawingContext.disable(blurFBO.drawingContext.CULL_FACE); 
+
+  // --- Compile the blur shader programs from their source strings ---
+  // The .join('\n') method converts the array of strings (from loadStrings)
+  // back into a single string that createShader() expects.
+  blurShaderHorizontal = createShader(blurVertSource.join('\n'), horizontalBlurFragSource.join('\n'));
+  blurShaderVertical = createShader(blurVertSource.join('\n'), verticalBlurFragSource.join('\n'));
 
   // --- UI Element Selections ---
+  // Ensure these IDs match your HTML.
   depthSlider = select("#depthSlider");
   tiltXSlider = select("#tiltXSlider");
   tiltYSlider = select("#tiltYSlider");
@@ -629,6 +661,12 @@ function getLFOValueForExport(type, currentFrame, totalFrames) {
 function draw() {
   background(0);
 
+  // P5.js WEBGL warning: If you see "WEBGL: you must load and set a font...",
+  // it's because text() is used here for loading messages without a font.
+  // For a production app, you'd typically load a font in preload() and set it
+  // with textFont() in setup() before drawing text in WEBGL mode.
+  // For debugging, it's harmless.
+
   let src = null;
   if (uploadedMedia && uploadedType === 'image' && currentSourceReady) src = uploadedMedia;
   else if (uploadedMedia && uploadedType === 'video' && currentSourceReady) src = uploadedMedia;
@@ -638,27 +676,9 @@ function draw() {
     fill(255);
     textSize(24);
     textAlign(CENTER, CENTER);
-    text(loadingMessage, 0, 0);
+    text(loadingMessage, 0, 0); // This text should appear if src is not ready
     return;
   }
-
-  graphics.clear();
-  graphics.shader(theShader);
-  graphics.texture(src);
-
-  theShader.setUniform('uSampler', src);
-  theShader.setUniform('uResolution', [width, height]);
-  theShader.setUniform('uTextureResolution', [src.width, src.height]);
-  theShader.setUniform('uGamma', gammaValue);
-  theShader.setUniform('uCameraPosition', [0.0, 0.0, 0.0]);
-
-  // Declare variables for parameters, to be filled by either sequence or sliders/LFOs
-  let currentDepth, currentTiltX, currentTiltY, currentScale, currentDensity;
-  let currentShapeX, currentShapeY, currentWaveAmp, currentWaveFreq;
-  let currentHorizAmp, currentVertAmp, currentOffsetX, currentOffsetY;
-  let currentBlurRadius, currentEdgeThreshold, currentEdgeIntensity,
-      currentNormalEdgeStrength, currentDepthEdgeStrength,
-      currentTemporalStrength, currentTemporalDecay;
 
   // --- Determine Parameters (Sequence or Sliders/LFOs) ---
   let animatedParams = null;
@@ -666,41 +686,45 @@ function draw() {
     animatedParams = sequenceManager.getAnimatedParameters();
   }
 
+  let currentDepth, currentTiltX, currentTiltY, currentScale, currentDensity;
+  let currentShapeX, currentShapeY, currentWaveAmp, currentWaveFreq;
+  let currentHorizAmp, currentVertAmp, currentOffsetX, currentOffsetY;
+  let currentBlurRadius, currentEdgeThreshold, currentEdgeIntensity,
+      currentNormalEdgeStrength, currentDepthEdgeStrength,
+      currentTemporalStrength, currentTemporalDecay;
+
   if (animatedParams) {
-    // Use values from the sequence manager
     currentDepth = animatedParams.depth;
-    currentTiltX = radians(animatedParams.tiltX); // Convert degrees to radians for shader
-    currentTiltY = radians(animatedParams.tiltY); // Convert degrees to radians for shader
+    currentTiltX = radians(animatedParams.tiltX);
+    currentTiltY = radians(animatedParams.tiltY);
     currentScale = animatedParams.scale;
     currentShapeX = animatedParams.shapeX;
     currentShapeY = animatedParams.shapeY;
     currentWaveAmp = animatedParams.waveAmp;
     currentWaveFreq = animatedParams.waveFreq;
-    currentHorizAmp = animatedParams.horizAmp;
+    currentHorizAmp = animatedParams.horizAmp; 
     currentVertAmp = animatedParams.vertAmp;
     currentOffsetX = animatedParams.offsetX;
     currentOffsetY = animatedParams.offsetY;
     currentBlurRadius = animatedParams.blurRadius;
     currentEdgeIntensity = animatedParams.edgeIntensity;
 
-    // For parameters not explicitly animated in the sequence, use slider values
-    currentDensity = int(densitySlider.value());
-    currentEdgeThreshold = Number(edgeThresholdSlider.value());
+    currentDensity = int(densitySlider.value()); // Density is not animated by sequence, so from slider
+    currentEdgeThreshold = Number(edgeThresholdSlider.value()); // Similarly, these are from sliders
     currentNormalEdgeStrength = Number(normalEdgeStrengthSlider.value());
     currentDepthEdgeStrength = Number(depthEdgeStrengthSlider.value());
     currentTemporalStrength = Number(temporalStrengthSlider.value());
     currentTemporalDecay = Number(temporalDecaySlider.value());
 
   } else {
-    // Use slider and LFO values (your existing logic)
     let lfoFreq = Number(lfoFreqSlider.value());
     let lfoAmp = Number(lfoAmpSlider.value());
     let lfoType = lfoTypeSelector.value();
     let lfoValue;
 
-    if (exportMode) { // Use export LFO if in export mode
+    if (exportMode) {
       lfoValue = getLFOValueForExport(lfoType, currentFrameForExport, totalFramesForExport);
-    } else { // Otherwise, use real-time LFO
+    } else {
       lfoValue = getLFOValue(lfoType, lfoFreq);
     }
 
@@ -749,8 +773,21 @@ function draw() {
     currentTemporalDecay = Number(temporalDecaySlider.value());
   }
 
+  // --- PASS 1: Render Rutt-Etra effect to the 'graphics' P5.Graphics object ---
+  graphics.clear(); // Clear the graphics FBO
+  graphics.resetShader(); // Reset shader for graphics
+  graphics.shader(theShader); // Apply your main Rutt-Etra shader to 'graphics'
 
-  // --- Set Uniforms for Vertex Shader ---
+  // Set all uniforms for your Rutt-Etra shader
+  theShader.setUniform('uSampler', src);
+  theShader.setUniform('uResolution', [width, height]);
+  theShader.setUniform('uTextureResolution', [src.width, src.height]);
+  theShader.setUniform('uGamma', gammaValue);
+  theShader.setUniform('uCameraPosition', [0.0, 0.0, 0.0]);
+  theShader.setUniform('uTime', frameCount * 0.01);
+  theShader.setUniform('uFrameCount', float(frameCount));
+
+  // Rutt-Etra Specific Uniforms (Vertex Shader parameters)
   theShader.setUniform('uDepth', currentDepth);
   theShader.setUniform('uShapeX', currentShapeX);
   theShader.setUniform('uShapeY', currentShapeY);
@@ -760,11 +797,8 @@ function draw() {
   theShader.setUniform('uVertAmp', currentVertAmp);
   theShader.setUniform('uOffsetX', currentOffsetX);
   theShader.setUniform('uOffsetY', currentOffsetY);
-  theShader.setUniform('uTime', frameCount * 0.01);
-  theShader.setUniform('uFrameCount', float(frameCount));
 
-  // --- Set Uniforms for Fragment Shader ---
-  theShader.setUniform('uBlurRadius', currentBlurRadius);
+  // Post-processing uniforms (Fragment Shader parameters) - these are NOT blur related
   theShader.setUniform('uEdgeThreshold', currentEdgeThreshold);
   theShader.setUniform('uEdgeIntensity', currentEdgeIntensity);
   theShader.setUniform('uNormalEdgeStrength', currentNormalEdgeStrength);
@@ -772,25 +806,47 @@ function draw() {
   theShader.setUniform('uTemporalStrength', currentTemporalStrength);
   theShader.setUniform('uTemporalDecay', currentTemporalDecay);
 
-
-  // Apply transformations directly to the graphics object
+  // Apply transformations directly to graphics context before drawing the plane
   graphics.push();
-  graphics.translate(0, 0, 0);
+  graphics.translate(0, 0, 0); // Center the plane
   graphics.rotateX(currentTiltX);
   graphics.rotateY(currentTiltY);
   graphics.scale(currentScale);
-  graphics.noStroke();
+  graphics.noStroke(); // Ensure no stroke is applied to the plane for the shader
 
   let detailY = max(2, int(height / currentDensity));
   let detailX = max(2, int(width / currentDensity));
 
-  graphics.plane(width, height, detailX, detailY);
+  graphics.plane(width, height, detailX, detailY); // Draw a full-screen quad to graphics
   graphics.pop();
 
-  image(graphics, -width / 2, -height / 2, width, height);
+
+  // --- PASS 2: Apply Horizontal Blur to 'graphics' content, render to blurFBO ---
+  blurFBO.clear();
+  blurFBO.resetShader();
+  blurFBO.shader(blurShaderHorizontal); // Use the horizontal blur shader
+
+  blurShaderHorizontal.setUniform('uInputTexture', graphics); // Input is the output from Pass 1 (Rutt-Etra)
+  blurShaderHorizontal.setUniform('uBlurRadius', currentBlurRadius); // Pass slider value
+  blurShaderHorizontal.setUniform('uResolution', [width, height]); // Pass canvas resolution
+
+  blurFBO.quad(-1, -1, 1, -1, 1, 1, -1, 1); // Draw a full-screen quad to blurFBO
+
+
+  // --- PASS 3: Apply Vertical Blur to blurFBO content, render to the main canvas ---
+  clear(); // Clear the main canvas
+  resetShader(); // Reset shader for the main canvas
+  shader(blurShaderVertical); // Use the vertical blur shader
+
+  blurShaderVertical.setUniform('uInputTexture', blurFBO); // Input is the output from Pass 2 (horizontally blurred)
+  blurShaderVertical.setUniform('uBlurRadius', currentBlurRadius); // Pass slider value
+  blurShaderVertical.setUniform('uResolution', [width, height]); // Pass canvas resolution
+
+  quad(-1, -1, 1, -1, 1, 1, -1, 1); // Draw a full-screen quad to the main canvas
+
 
   // Update UI Labels (only if sequence is NOT playing)
-  if (!animatedParams) { // If animatedParams is null, sequence is not playing
+  if (!animatedParams) {
     select("#depthLabel").html(Number(depthSlider.value()).toFixed(0));
     select("#tiltXLabel").html((Number(tiltXSlider.value())).toFixed(0) + "°");
     select("#tiltYLabel").html(tiltYSlider.value() + "°");
