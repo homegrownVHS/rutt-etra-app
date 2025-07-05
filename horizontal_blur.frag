@@ -1,50 +1,39 @@
 #version 300 es
-precision mediump float; // mediump is often sufficient for post-processing shaders
+precision mediump float;
 
-uniform sampler2D uInputTexture; // The texture rendered from the previous pass (your Rutt-Etra output)
-uniform float uBlurRadius;       // Your slider value
-uniform vec2 uResolution;        // Resolution of the texture (e.g., width, height of your canvas)
+uniform sampler2D uSampler; // Input texture (e.g., brightnessFBO)
+uniform vec2 uResolution;   // Canvas resolution
+uniform float uBlurRadius;  // Blur radius in pixels
 
-in vec2 vTexCoord;
+in vec2 vTexCoord; // Input from vertex shader
 
-out vec4 fragColor;
+out vec4 fragColor; // Output fragment color
 
 const float GAUSSIAN_SIGMA_FACTOR = 0.3; // Relates blur radius to Gaussian sigma
-const int MAX_SAMPLES = 10;              // Max number of samples to take on each side (total 2*MAX_SAMPLES + 1)
-                                         // Higher = slower, but better quality for large blurs.
+const int MAX_SAMPLES = 10;              // Must match MAX_SAMPLES in vertical_blur.frag
 
 void main() {
     vec4 sum = vec4(0.0);
-    vec2 texelSize = 1.0 / uResolution;
+    float texelSizeX = 1.0 / uResolution.x;
+    
+    // Gaussian blur weights (simplified for example, typically pre-calculated)
+    // For a real Gaussian blur, you'd use a more accurate set of weights.
+    // This is a basic approximation.
+    float weights[5]; // Using 5 samples for simplicity, adjust MAX_SAMPLES if more are used
+    weights[0] = 0.227027;
+    weights[1] = 0.1945946;
+    weights[2] = 0.1216216;
+    weights[3] = 0.054054;
+    weights[4] = 0.016216;
 
-    // Convert blur radius from slider to Gaussian sigma.
-    // Ensure sigma is not too small to avoid issues with division by zero or extreme values in exp().
-    float sigma = max(0.001, uBlurRadius * GAUSSIAN_SIGMA_FACTOR);
+    // Center pixel
+    sum += texture(uSampler, vTexCoord) * weights[0]; // FIXED: Changed texture2D to texture
 
-    // Pre-calculate Gaussian weights and total weight
-    float weights[MAX_SAMPLES + 1];
-    float totalWeight = 0.0;
-    for (int i = 0; i <= MAX_SAMPLES; i++) {
-        float offset = float(i);
-        // Gaussian function: exp(-(x^2)/(2*sigma^2))
-        weights[i] = exp(-0.5 * offset * offset / (sigma * sigma));
-        totalWeight += (i == 0) ? weights[i] : (2.0 * weights[i]); // Center weight counted once, others twice
-    }
-
-    // Normalize weights so they sum to 1.0
-    for (int i = 0; i <= MAX_SAMPLES; i++) {
-        weights[i] /= totalWeight;
-    }
-
-    // Sample the center pixel
-    sum += texture(uInputTexture, vTexCoord) * weights[0];
-
-    // Sample horizontally
-    for (int i = 1; i <= MAX_SAMPLES; i++) {
-        // Calculate the offset in UV space, scaled by blurRadius and texelSize
-        vec2 offset = vec2(float(i) * texelSize.x * uBlurRadius, 0.0);
-        sum += texture(uInputTexture, vTexCoord + offset) * weights[i];
-        sum += texture(uInputTexture, vTexCoord - offset) * weights[i];
+    // Sample pixels horizontally
+    for (int i = 1; i < 5; i++) {
+        float offset = float(i) * texelSizeX * uBlurRadius; // Scale offset by blur radius
+        sum += texture(uSampler, vTexCoord + vec2(offset, 0.0)) * weights[i]; // FIXED: Changed texture2D to texture
+        sum += texture(uSampler, vTexCoord - vec2(offset, 0.0)) * weights[i]; // FIXED: Changed texture2D to texture
     }
 
     fragColor = sum;

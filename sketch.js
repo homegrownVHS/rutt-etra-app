@@ -6,6 +6,9 @@ let stepSize = 6;
 let theShader;
 let graphics; // p5.Graphics object for offscreen rendering with the main shader
 
+// NEW: Shader for brightness extraction
+let brightnessShader;
+
 // Loading state indicator
 let isLoading = false;
 let loadingMessage = "Initializing...";
@@ -86,12 +89,16 @@ let exportMode = false; // Flag to indicate if we are in export mode
 let blurVertSource;
 let horizontalBlurFragSource;
 let verticalBlurFragSource;
+let passthroughVertSource; // NEW: For brightness shader
+let brightnessFragSource;  // NEW: For brightness shader
 
 // Shader objects created from the source strings (compiled in setup)
 let blurShaderHorizontal; 
 let blurShaderVertical;   
 
-let blurFBO; // Single FBO for intermediate blur pass
+// NEW: FBOs for blur passes
+let brightnessFBO; // New FBO to render brightness data
+let blurTempFBO;   // FBO for intermediate horizontal blur pass
 
 // Global variable for the sequence toggle button
 let sequenceToggleButton;
@@ -107,6 +114,10 @@ function preload() {
   blurVertSource = loadStrings('blur.vert'); 
   horizontalBlurFragSource = loadStrings('horizontal_blur.frag'); 
   verticalBlurFragSource = loadStrings('vertical_blur.frag');   
+
+  // NEW: Load source for brightness extraction shader
+  passthroughVertSource = loadStrings('passthrough.vert');
+  brightnessFragSource = loadStrings('brightness.frag');
 }
 
 
@@ -120,17 +131,24 @@ function setup() {
   // Disable back-face culling for 3D rendering in graphics buffer if needed.
   graphics.drawingContext.disable(graphics.drawingContext.CULL_FACE);
   
-  // Initialize blurFBO for the intermediate blur pass.
-  blurFBO = createGraphics(width, height, WEBGL);
-  // Disable culling for the blur FBO as well.
-  // FIX: Changed 'blurFadingContext' to 'blurFBO.drawingContext'
-  blurFBO.drawingContext.disable(blurFBO.drawingContext.CULL_FACE); 
+  // NEW: Initialize brightnessFBO and blurTempFBO
+  brightnessFBO = createGraphics(width, height, WEBGL);
+  brightnessFBO.drawingContext.disable(brightnessFBO.drawingContext.CULL_FACE);
+
+  blurTempFBO = createGraphics(width, height, WEBGL);
+  blurTempFBO.drawingContext.disable(blurTempFBO.drawingContext.CULL_FACE); 
 
   // --- Compile the blur shader programs from their source strings ---
   // The .join('\n') method converts the array of strings (from loadStrings)
   // back into a single string that createShader() expects.
   blurShaderHorizontal = createShader(blurVertSource.join('\n'), horizontalBlurFragSource.join('\n'));
   blurShaderVertical = createShader(blurVertSource.join('\n'), verticalBlurFragSource.join('\n'));
+  brightnessShader = createShader(passthroughVertSource.join('\n'), brightnessFragSource.join('\n'));
+
+  // No explicit gl.getProgramParameter checks here.
+  // P5.js's createShader (or loadShader) should log errors directly if compilation/linking fails.
+  // Make sure verbose WebGL logging is enabled in your browser's dev tools.
+
 
   // --- UI Element Selections ---
   // Ensure these IDs match your HTML.
@@ -226,7 +244,6 @@ function setup() {
             console.log("DEBUG: Uploaded video re-started successfully with sequence.");
           }).catch(error => {
             console.warn("DEBUG: Uploaded video re-start prevented:", error.name, error.message);
-            // Consider adding a user-facing message here if autoplay fails
           });
         } else {
           console.warn("DEBUG: uploadedMedia.elt.play() did not return a Promise. Attempting direct play.");
@@ -236,9 +253,6 @@ function setup() {
         // If a camera is active and the sequence starts, ensure it's playing if it somehow paused.
         // Live camera streams don't 'rewind'.
         console.log("DEBUG: Sequence started, camera active. No rewind needed for live stream.");
-        // If 'cam' is a p5.MediaElement (like from createCapture), you might call play()
-        // if it could have been paused for any reason.
-        // cam.play(); // Uncomment if your camera sometimes pauses
       }
     } else {
       // If the sequence just *stopped* playing, you might want to pause the video too
@@ -246,27 +260,7 @@ function setup() {
         uploadedMedia.pause();
         console.log("DEBUG: Uploaded video paused with sequence stop.");
       }
-      // You could also stop the camera here if desired, but usually it keeps running.
-      // if (cam && uploadedType === 'camera') {
-      //   // cam.stop(); // Uncomment if you want to stop camera stream when sequence stops
-      // }
     }
-    // --- END NEW VIDEO RESTART LOGIC ---
-
-    // Optionally update UI elements here if sequence overrides them
-    // (e.g., reset LFO checkboxes)
-    lfoDepth.checked(false); // Make sure LFOs are off when sequence starts
-    lfoTiltX.checked(false);
-    lfoTiltY.checked(false);
-    lfoScale.checked(false);
-    lfoShapeX.checked(false);
-    lfoShapeY.checked(false);
-    lfoWaveAmp.checked(false);
-    lfoWaveFreq.checked(false);
-    lfoHorizAmp.checked(false);
-    lfoVertAmp.checked(false);
-    lfoOffsetX.checked(false);
-    lfoOffsetY.checked(false);
   });
 
   let controlsDiv = select("#controls");
@@ -559,7 +553,7 @@ function handleFileDrop(file) {
       isLoading = false;
       loadingMessage = "";
     }, (event) => {
-      console.error("DEBUG: Error loading dropped image:", event);
+      console.error("DEBUG: Error loading image:", event);
       currentSourceReady = false;
       isLoading = false;
       loadingMessage = `Dropped image error: ${event}`;
@@ -592,10 +586,10 @@ function handleFileDrop(file) {
     };
 
     vid.elt.onerror = (e) => {
-      console.error("DEBUG: Video loading error from drop:", e);
+      console.error("DEBUG: Video loading error:", e);
       currentSourceReady = false;
       isLoading = false;
-      loadingMessage = `Dropped video error: ${e.message || e}`;
+      loadingMessage = `Video load error: ${e.message || e}`;
       uploadedMedia = null;
     };
 
@@ -661,12 +655,6 @@ function getLFOValueForExport(type, currentFrame, totalFrames) {
 function draw() {
   background(0);
 
-  // P5.js WEBGL warning: If you see "WEBGL: you must load and set a font...",
-  // it's because text() is used here for loading messages without a font.
-  // For a production app, you'd typically load a font in preload() and set it
-  // with textFont() in setup() before drawing text in WEBGL mode.
-  // For debugging, it's harmless.
-
   let src = null;
   if (uploadedMedia && uploadedType === 'image' && currentSourceReady) src = uploadedMedia;
   else if (uploadedMedia && uploadedType === 'video' && currentSourceReady) src = uploadedMedia;
@@ -676,11 +664,10 @@ function draw() {
     fill(255);
     textSize(24);
     textAlign(CENTER, CENTER);
-    text(loadingMessage, 0, 0); // This text should appear if src is not ready
+    text(loadingMessage, 0, 0);
     return;
   }
 
-  // --- Determine Parameters (Sequence or Sliders/LFOs) ---
   let animatedParams = null;
   if (typeof sequenceManager !== 'undefined' && sequenceManager.isPlaying) {
     animatedParams = sequenceManager.getAnimatedParameters();
@@ -709,8 +696,8 @@ function draw() {
     currentBlurRadius = animatedParams.blurRadius;
     currentEdgeIntensity = animatedParams.edgeIntensity;
 
-    currentDensity = int(densitySlider.value()); // Density is not animated by sequence, so from slider
-    currentEdgeThreshold = Number(edgeThresholdSlider.value()); // Similarly, these are from sliders
+    currentDensity = int(densitySlider.value());
+    currentEdgeThreshold = Number(edgeThresholdSlider.value());
     currentNormalEdgeStrength = Number(normalEdgeStrengthSlider.value());
     currentDepthEdgeStrength = Number(depthEdgeStrengthSlider.value());
     currentTemporalStrength = Number(temporalStrengthSlider.value());
@@ -773,13 +760,51 @@ function draw() {
     currentTemporalDecay = Number(temporalDecaySlider.value());
   }
 
-  // --- PASS 1: Render Rutt-Etra effect to the 'graphics' P5.Graphics object ---
-  graphics.clear(); // Clear the graphics FBO
-  graphics.resetShader(); // Reset shader for graphics
-  graphics.shader(theShader); // Apply your main Rutt-Etra shader to 'graphics'
+  // --- RENDERING PIPELINE ---
 
-  // Set all uniforms for your Rutt-Etra shader
-  theShader.setUniform('uSampler', src);
+  // --- PASS 0: Render source to brightnessFBO (grayscale) ---
+  // This takes the original video/image and converts it to a grayscale brightness map.
+  brightnessFBO.clear();
+  brightnessFBO.resetShader();
+  brightnessFBO.shader(brightnessShader);
+  brightnessShader.setUniform('uSampler', src);
+  // Use a quad to draw the texture to the FBO
+  brightnessFBO.quad(-1, -1, 1, -1, 1, 1, -1, 1); 
+
+  // --- PASS 1 & 2: Apply Horizontal and Vertical Blur to brightnessFBO ---
+  // The blur is applied only to the brightness data.
+  if (currentBlurRadius > 0.01) { // Only apply blur if radius is significant
+    // Horizontal blur from brightnessFBO to blurTempFBO
+    blurTempFBO.clear();
+    blurTempFBO.resetShader();
+    blurTempFBO.shader(blurShaderHorizontal);
+    blurShaderHorizontal.setUniform('uSampler', brightnessFBO); // Input is the brightness map
+    blurShaderHorizontal.setUniform('uResolution', [width, height]);
+    blurShaderHorizontal.setUniform('uBlurRadius', currentBlurRadius);
+    // Use a quad to draw the texture to the FBO
+    blurTempFBO.quad(-1, -1, 1, -1, 1, 1, -1, 1); 
+
+    // Vertical blur from blurTempFBO back to brightnessFBO
+    brightnessFBO.clear(); // Clear brightnessFBO before drawing into it
+    brightnessFBO.resetShader();
+    brightnessFBO.shader(blurShaderVertical);
+    blurShaderVertical.setUniform('uSampler', blurTempFBO); // Input is the horizontally blurred map
+    blurShaderVertical.setUniform('uResolution', [width, height]);
+    blurShaderVertical.setUniform('uBlurRadius', currentBlurRadius);
+    // Use a quad to draw the texture to the FBO
+    brightnessFBO.quad(-1, -1, 1, -1, 1, 1, -1, 1); 
+  }
+  // If blurRadius is zero, brightnessFBO will still contain the unblurred brightness from Pass 0.
+
+  // --- PASS 3: Render Rutt-Etra effect to the 'graphics' P5.Graphics object ---
+  // This pass uses the ORIGINAL color source for uSampler and the BLURRED brightnessFBO for depth.
+  graphics.clear();
+  graphics.resetShader();
+  graphics.shader(theShader);
+
+  // Set uniforms for your Rutt-Etra shader
+  theShader.setUniform('uSampler', src); // Original color image
+  theShader.setUniform('uBlurredBrightnessMap', brightnessFBO); // NEW: Blurred brightness for depth!
   theShader.setUniform('uResolution', [width, height]);
   theShader.setUniform('uTextureResolution', [src.width, src.height]);
   theShader.setUniform('uGamma', gammaValue);
@@ -798,7 +823,7 @@ function draw() {
   theShader.setUniform('uOffsetX', currentOffsetX);
   theShader.setUniform('uOffsetY', currentOffsetY);
 
-  // Post-processing uniforms (Fragment Shader parameters) - these are NOT blur related
+  // Post-processing uniforms (Fragment Shader parameters)
   theShader.setUniform('uEdgeThreshold', currentEdgeThreshold);
   theShader.setUniform('uEdgeIntensity', currentEdgeIntensity);
   theShader.setUniform('uNormalEdgeStrength', currentNormalEdgeStrength);
@@ -806,44 +831,31 @@ function draw() {
   theShader.setUniform('uTemporalStrength', currentTemporalStrength);
   theShader.setUniform('uTemporalDecay', currentTemporalDecay);
 
-  // Apply transformations directly to graphics context before drawing the plane
   graphics.push();
-  graphics.translate(0, 0, 0); // Center the plane
+  graphics.translate(0, 0, -150); // Moved the plane back slightly to prevent near-plane clipping
   graphics.rotateX(currentTiltX);
   graphics.rotateY(currentTiltY);
   graphics.scale(currentScale);
-  graphics.noStroke(); // Ensure no stroke is applied to the plane for the shader
+  graphics.noStroke();
 
   let detailY = max(2, int(height / currentDensity));
   let detailX = max(2, int(width / currentDensity));
 
-  graphics.plane(width, height, detailX, detailY); // Draw a full-screen quad to graphics
+  graphics.plane(width, height, detailX, detailY);
   graphics.pop();
 
+  // --- Final Pass: Draw the 'graphics' FBO to the main canvas ---
+  // This is the final result of the Rutt-Etra effect.
+  resetShader(); // Reset to default p5.js shader for drawing textures
+  image(graphics, -width / 2, -height / 2, width, height); 
 
-  // --- PASS 2: Apply Horizontal Blur to 'graphics' content, render to blurFBO ---
-  blurFBO.clear();
-  blurFBO.resetShader();
-  blurFBO.shader(blurShaderHorizontal); // Use the horizontal blur shader
-
-  blurShaderHorizontal.setUniform('uInputTexture', graphics); // Input is the output from Pass 1 (Rutt-Etra)
-  blurShaderHorizontal.setUniform('uBlurRadius', currentBlurRadius); // Pass slider value
-  blurShaderHorizontal.setUniform('uResolution', [width, height]); // Pass canvas resolution
-
-  blurFBO.quad(-1, -1, 1, -1, 1, 1, -1, 1); // Draw a full-screen quad to blurFBO
-
-
-  // --- PASS 3: Apply Vertical Blur to blurFBO content, render to the main canvas ---
-  clear(); // Clear the main canvas
-  resetShader(); // Reset shader for the main canvas
-  shader(blurShaderVertical); // Use the vertical blur shader
-
-  blurShaderVertical.setUniform('uInputTexture', blurFBO); // Input is the output from Pass 2 (horizontally blurred)
-  blurShaderVertical.setUniform('uBlurRadius', currentBlurRadius); // Pass slider value
-  blurShaderVertical.setUniform('uResolution', [width, height]); // Pass canvas resolution
-
-  quad(-1, -1, 1, -1, 1, 1, -1, 1); // Draw a full-screen quad to the main canvas
-
+  // Display loading message on top of everything if applicable
+  if (isLoading) {
+    fill(255);
+    textSize(24);
+    textAlign(CENTER, CENTER);
+    text(loadingMessage, 0, 0);
+  }
 
   // Update UI Labels (only if sequence is NOT playing)
   if (!animatedParams) {

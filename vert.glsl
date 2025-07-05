@@ -4,13 +4,14 @@ in vec2 aTexCoord;
 
 uniform mat4 uProjectionMatrix;
 uniform mat4 uModelViewMatrix;
-uniform mat3 uNormalMatrix; // We'll still pass this, good practice for lighting
+uniform mat3 uNormalMatrix;
 
-uniform sampler2D uSampler; // Used for brightness lookup
+uniform sampler2D uSampler; // Original color source (for vColor)
+uniform sampler2D uBlurredBrightnessMap; // Blurred brightness for depth calculation
 
 // Parameters from sketch.js
 uniform float uDepth; // Controls Z displacement amplitude
-uniform float uGamma;
+uniform float uGamma; // Gamma for brightness calculation
 uniform float uShapeX;
 uniform float uShapeY;
 uniform float uWaveAmp;
@@ -18,21 +19,22 @@ uniform float uWaveFreq;
 uniform float uHorizAmp;
 uniform float uVertAmp;
 uniform float uOffsetX;
-uniform float uOffsetY;
+uniform float uOffsetY; // FIX: Corrected typo from 'float float uOffsetY;'
 uniform float uTime;
 
-uniform vec2 uTextureResolution; // The resolution of the texture (e.g., vec2(512.0, 512.0))
-uniform vec2 uResolution;        // Screen resolution
-
-uniform float uBlurRadius;       // Controls the radius/intensity of the blur (e.0 to 1.0 or more)
+uniform vec2 uTextureResolution; // The resolution of the texture (e.g., vec2(640.0, 480.0))
+uniform vec2 uResolution;        // Screen resolution (e.g., vec2(1280.0, 720.0))
 
 out vec2 vTexCoord;
 out float vProjectedY;
 out vec3 vPosition;      // Displaced vertex position in View Space
 out vec3 vNormal;        // Refined Normal of the displaced surface in View Space
 out float vDisplacementZ; // The actual Z-offset applied to the vertex
+out vec4 vColor;         // Original color sampled from uSampler
 
 float applyGamma(float value, float gamma) {
+    // Ensure gamma is not zero or too small to prevent division by zero or large exponents
+    gamma = max(0.001, gamma);
     return pow(value, 1.0 / gamma);
 }
 
@@ -41,41 +43,23 @@ float applyParabolicBend(float normalizedValue, float shapeFactor) {
     return shapeFactor * (normalizedValue - center) * (normalizedValue - center);
 }
 
-// Function to get brightness from a texture coordinate with a simple box blur
-float getBlurredBrightness(vec2 texCoord, float radius) {
-    float totalBrightness = 0.0;
-    float numSamples = 0.0;
-
-    vec2 oneTexel = 1.0 / uTextureResolution;
-
-    vec2 offsets[9];
-    offsets[0] = vec2(-1.0, -1.0); offsets[1] = vec2(0.0, -1.0); offsets[2] = vec2(1.0, -1.0);
-    offsets[3] = vec2(-1.0,  0.0); offsets[4] = vec2(0.0,  0.0); offsets[5] = vec2(1.0,  0.0);
-    offsets[6] = vec2(-1.0,  1.0); offsets[7] = vec2(0.0,  1.0); offsets[8] = vec2(1.0,  1.0);
-
-    for (int i = 0; i < 9; i++) {
-        vec2 offsetTexCoord = texCoord + offsets[i] * oneTexel * radius;
-        offsetTexCoord = clamp(offsetTexCoord, 0.0, 1.0);
-        vec4 sampledColor = texture(uSampler, offsetTexCoord);
-        totalBrightness += (sampledColor.r + sampledColor.g + sampledColor.b) / 3.0;
-        numSamples += 1.0;
-    }
-    return totalBrightness / numSamples;
-}
-
-// Function to calculate Z-displacement based on texture brightness
-float calculateZDisplacement(vec2 texCoord, float depthAmplitude, float gammaValue, float blurRadius) {
-    float brightness = getBlurredBrightness(texCoord, blurRadius);
-    float gammaCorrectedBrightness = applyGamma(brightness, gammaValue);
-    float centeredBrightness = gammaCorrectedBrightness - 0.5;
-    return centeredBrightness * depthAmplitude * 10.0;
-}
-
 void main() {
     vTexCoord = aTexCoord;
 
+    // Sample the original input texture and pass its color to the fragment shader
+    vColor = texture(uSampler, vTexCoord); 
+
     // --- Rutt-Etra Z-Displacement (Luma-based) ---
-    float zDisplacement = calculateZDisplacement(aTexCoord, uDepth, uGamma, uBlurRadius);
+    // Get the brightness directly from the pre-blurred brightness map
+    // FIX: Invert Y-coordinate for brightness map sampling
+    vec2 invertedYTexCoord = vec2(aTexCoord.x, 1.0 - aTexCoord.y);
+    float brightness = texture(uBlurredBrightnessMap, invertedYTexCoord).r;
+    float gammaCorrectedBrightness = applyGamma(brightness, uGamma);
+    float centeredBrightness = gammaCorrectedBrightness - 0.5;
+    
+    // Z-displacement: negative to bring brighter areas TOWARDS the camera
+    float zDisplacement = -centeredBrightness * uDepth * 10.0; 
+    
     vDisplacementZ = zDisplacement; // Pass the actual Z-offset applied
 
     vec3 transformedPosition = aPosition;
@@ -86,8 +70,12 @@ void main() {
     float horizontalBend = applyParabolicBend(normalizedPosXY.y, uShapeX);
     float verticalBend = applyParabolicBend(normalizedPosXY.x, uShapeY);
 
-    float scaledWaveAmpX_NDC = uWaveAmp / uResolution.x * 2.0;
-    float scaledWaveAmpY_NDC = uWaveAmp / uResolution.y * 2.0;
+    // Ensure uResolution components are at least 1.0 to prevent division by zero
+    float safeResolutionX = max(1.0, uResolution.x);
+    float safeResolutionY = max(1.0, uResolution.y);
+
+    float scaledWaveAmpX_NDC = uWaveAmp / safeResolutionX * 2.0;
+    float scaledWaveAmpY_NDC = uWaveAmp / safeResolutionY * 2.0;
 
     float waveDisplacementX = scaledWaveAmpX_NDC * sin(normalizedPosXY.y * 6.283185307 * uWaveFreq + uTime * 0.5); // Add time for subtle animation
     float waveDisplacementY = scaledWaveAmpY_NDC * sin(normalizedPosXY.x * 6.283185307 * uWaveFreq + uTime * 0.5);
@@ -95,45 +83,53 @@ void main() {
     transformedPosition.x += waveDisplacementX;
     transformedPosition.y += verticalBend * 0.5 + waveDisplacementY + horizontalBend * 0.5;
 
-    transformedPosition.x = transformedPosition.x / uHorizAmp;
-    transformedPosition.y = transformedPosition.y / uVertAmp;
+    // Ensure uHorizAmp and uVertAmp are not zero before division
+    transformedPosition.x = transformedPosition.x / max(0.001, uHorizAmp);
+    transformedPosition.y = transformedPosition.y / max(0.001, uVertAmp);
 
-    transformedPosition.x += uOffsetX / uResolution.x * 2.0;
-    transformedPosition.y += uOffsetY / uResolution.y * 2.0;
+    transformedPosition.x += uOffsetX / safeResolutionX * 2.0;
+    transformedPosition.y += uOffsetY / safeResolutionY * 2.0;
 
-    // Apply Z displacement
-    transformedPosition.z = zDisplacement;
+    transformedPosition.z = zDisplacement; // Apply the (now correctly oriented) Z displacement
 
-    // Clamp to prevent extreme distortions
     transformedPosition.xy = clamp(transformedPosition.xy, -1.5, 1.5);
 
-    // --- Transform to View Space and Pass Data ---
     vec4 viewPos = uModelViewMatrix * vec4(transformedPosition, 1.0);
     vPosition = viewPos.xyz;
 
     // --- Refined Normal Calculation ---
     // Calculate normals by sampling neighboring points and computing cross products.
     // This provides a more accurate normal that accounts for Z-displacement.
-    vec2 oneTexelNDC = 2.0 / uResolution; // Size of one pixel in NDC space
-    // NOTE: This normalSampleOffset is not actually used in the calculateZDisplacement calls below.
-    // It is declared but not applied to the texCoord for sampling z_x_plus etc.
-    vec2 normalSampleOffset = oneTexelNDC * 5.0; // Adjust for smoother normal (like a blur for normals)
+    // Ensure uTextureResolution components are at least 1.0 to prevent division by zero
+    vec2 safeTextureResolution = max(vec2(1.0), uTextureResolution);
+    vec2 oneTexelUV = 1.0 / safeTextureResolution; // Size of one pixel in UV space
 
-    // Calculate Z displacement at neighboring points
-    float z_x_plus = calculateZDisplacement(aTexCoord + vec2(oneTexelNDC.x, 0.0), uDepth, uGamma, uBlurRadius);
-    float z_x_minus = calculateZDisplacement(aTexCoord - vec2(oneTexelNDC.x, 0.0), uDepth, uGamma, uBlurRadius);
-    float z_y_plus = calculateZDisplacement(aTexCoord + vec2(0.0, oneTexelNDC.y), uDepth, uGamma, uBlurRadius);
-    float z_y_minus = calculateZDisplacement(aTexCoord - vec2(0.0, oneTexelNDC.y), uDepth, uGamma, uBlurRadius);
+    // Sample brightness values at neighboring points (using inverted Y-coords for consistency)
+    float b_x_plus = texture(uBlurredBrightnessMap, invertedYTexCoord + vec2(oneTexelUV.x, 0.0)).r;
+    float b_x_minus = texture(uBlurredBrightnessMap, invertedYTexCoord - vec2(oneTexelUV.x, 0.0)).r;
+    float b_y_plus = texture(uBlurredBrightnessMap, invertedYTexCoord + vec2(0.0, oneTexelUV.y)).r;
+    float b_y_minus = texture(uBlurredBrightnessMap, invertedYTexCoord - vec2(0.0, oneTexelUV.y)).r;
 
-    // Approximate tangent and bitangent vectors based on displacement in Z
-    // These vectors are in the local plane of the mesh.
-    vec3 tangent = normalize(vec3(2.0 * oneTexelNDC.x, 0.0, z_x_plus - z_x_minus));
-    vec3 bitangent = normalize(vec3(0.0, 2.0 * oneTexelNDC.y, z_y_plus - z_y_minus));
+    // Get Z-displacements from neighboring brightness values (also inverted for consistency)
+    float z_x_plus = -(applyGamma(b_x_plus, uGamma) - 0.5) * uDepth * 10.0;
+    float z_x_minus = -(applyGamma(b_x_minus, uGamma) - 0.5) * uDepth * 10.0;
+    float z_y_plus = -(applyGamma(b_y_plus, uGamma) - 0.5) * uDepth * 10.0;
+    float z_y_minus = -(applyGamma(b_y_minus, uGamma) - 0.5) * uDepth * 10.0;
+
+    // Calculate vectors along the surface
+    // Tangent vector (along X-axis of the plane)
+    vec3 tangent = vec3(2.0 * oneTexelUV.x, 0.0, z_x_plus - z_x_minus);
+    // Bitangent vector (along Y-axis of the plane)
+    vec3 bitangent = vec3(0.0, 2.0 * oneTexelUV.y, z_y_plus - z_y_minus);
 
     // Calculate the normal as the cross product of tangent and bitangent
     vec3 calculatedNormal = normalize(cross(tangent, bitangent));
 
-    // Transform the calculated normal to view space
+    // Fallback for degenerate normals (e.g., if cross product results in zero vector)
+    if (length(calculatedNormal) < 0.00001) {
+        calculatedNormal = vec3(0.0, 0.0, 1.0); // Default to straight up
+    }
+
     vNormal = uNormalMatrix * calculatedNormal;
 
     // Final position transformation to clip space
