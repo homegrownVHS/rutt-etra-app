@@ -40,7 +40,7 @@ float getLuminosity(vec3 color) {
 
 void main() {
     // We get the original color from vColor, passed from the vertex shader
-    vec3 gammaCorrectedColor = applyGammaCorrection(vColor.rgb, uGamma);
+    vec3 baseColor = vColor.rgb; // Use vColor.rgb as the starting color for effects
 
     // --- CRUCIAL ADDITION: Discard fragment if fully transparent ---
     if (vColor.a < 0.001) { // Using a small epsilon to catch near-zero alpha
@@ -52,9 +52,10 @@ void main() {
     if (length(vNormal.xy) < 0.0001) temporalOffsetDir = vec2(0.0); // Avoid NaN if vNormal.xy is (0,0)
 
     vec2 temporalOffset = temporalOffsetDir * uTemporalStrength * sin(uTime * 0.1);
+    // Sample from uSampler (original color source) for temporal effect
     vec4 temporalSample = texture(uSampler, vTexCoord + temporalOffset * 0.005); // Small texture offset
-    vec3 temporalColor = applyGammaCorrection(temporalSample.rgb, uGamma);
-    gammaCorrectedColor = mix(gammaCorrectedColor, temporalColor, uTemporalStrength * (1.0 - uTemporalDecay));
+    // Apply temporal effect to the base color BEFORE other effects
+    baseColor = mix(baseColor, temporalSample.rgb, uTemporalStrength * (1.0 - uTemporalDecay));
 
     // --- Fresnel Effect and Enhanced Edge Detection ---
     vec3 N = normalize(vNormal); // N is the interpolated normal from vertex shader
@@ -72,7 +73,7 @@ void main() {
     vec3 fresnelColor = vec3(0.8, 0.9, 1.0); // Light blue/white tint
     float fresnelIntensity = 0.6;
 
-    gammaCorrectedColor += fresnelColor * fresnel * fresnelIntensity;
+    baseColor += fresnelColor * fresnel * fresnelIntensity; // Add fresnel to the base color
 
     float normalEdge = 0.0;
     float depthEdge = 0.0;
@@ -83,7 +84,7 @@ void main() {
 
     // Depth-based edge calculation - NOW USES uBlurredBrightnessMap
     vec2 safeTextureResolution = max(vec2(1.0), uTextureResolution); // Safeguard
-    vec2 texelSize = 1.0 / safeTextureResolution; 
+    vec2 texelSize = 1.0 / safeTextureResolution;
     float centerDepthBrightness = texture(uBlurredBrightnessMap, vTexCoord).r; // Get brightness from blurred map
 
     // Sample neighboring pixels from the BLURRED BRIGHTNESS MAP
@@ -92,7 +93,7 @@ void main() {
     float d3 = texture(uBlurredBrightnessMap, vTexCoord + texelSize * vec2(0.0, 1.0)).r;
     float d4 = texture(uBlurredBrightnessMap, vTexCoord + texelSize * vec2(0.0, -1.0)).r;
 
-    // Calculate depth difference from the brightness values
+    // Calculate depth difference from the brightness values (luminance difference)
     float depthDifference = abs(centerDepthBrightness - d1) + abs(centerDepthBrightness - d2) + abs(centerDepthBrightness - d3) + abs(centerDepthBrightness - d4);
     depthEdge = smoothstep(uEdgeThreshold * 0.1, uEdgeThreshold * 0.5, depthDifference); // Use smaller range for depth threshold
 
@@ -102,7 +103,7 @@ void main() {
     // *** REVISED FIX FOR LFO CROSSING ZERO ***
     // We want a minimum edge effect when uDepth is very small.
     float baseEdgeStrength = 0.35; // TUNE THIS: Minimum edge strength when uDepth is near zero.
-                                    // Higher value = darker when flat.
+                                     // Higher value = darker when flat.
 
     float minNonZeroDepth = 0.02; // How far from zero uDepth must be before baseEdgeStrength fully disappears.
 
@@ -115,7 +116,7 @@ void main() {
     float effectiveFinalEdge = mix(calculatedFinalEdge, baseEdgeStrength, mix_factor);
 
     // Apply edge effect by darkening the color
-    vec3 finalColor = mix(gammaCorrectedColor, vec3(0.0), effectiveFinalEdge * uEdgeIntensity);
+    vec3 finalColor = mix(baseColor, vec3(0.0), effectiveFinalEdge * uEdgeIntensity);
 
 
     // --- Color shift based on Z depth ---
@@ -127,13 +128,13 @@ void main() {
             normalizedZ = clamp(normalizedZ, 0.0, 1.0);
         }
     }
-    // If you were using normalizedZ for a color shift, ensure that effect is smooth.
     // Example: finalColor.rgb = mix(finalColor.rgb, vec3(normalizedZ, 0.0, 1.0 - normalizedZ), 0.2);
+    // If you want to use this, uncomment and adjust the mix factor and target color.
 
 
     // Final clamping to ensure colors are valid
     finalColor = clamp(finalColor, 0.0, 1.0);
 
     // Output the final color with the original alpha
-    fragColor = vec4(finalColor, vColor.a); 
+    fragColor = vec4(finalColor, vColor.a);
 }
