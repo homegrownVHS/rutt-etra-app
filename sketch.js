@@ -435,7 +435,7 @@ function draw() {
   let baseTiltX = radians(Number(tiltXSlider.value()) + 90);
   let baseTiltY = radians(Number(tiltYSlider.value()));
   let baseScale = Number(scaleSlider.value());
-  stepSize = int(densitySlider.value());
+  stepSize = int(densitySlider.value()/2);
 
   let lfoFreq = Number(lfoFreqSlider.value());
   let lfoAmp = Number(lfoAmpSlider.value());
