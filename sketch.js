@@ -19,7 +19,10 @@ let offsetXSlider, offsetYSlider;
 let lfoOffsetX, lfoOffsetY;
 
 // --- FX globals --------------------------------------------------------------
-let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect;
+let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect, temporalSlider;
+
+// Uniform location caches – populated on first use, valid for program lifetime
+let progUniCache = {}, blurUniCache = {}, compUniCache = {};
 
 let currentSourceReady = false;
 let selectedDeviceId = null;
@@ -59,6 +62,7 @@ uniform float u_waveFreq;
 uniform float u_chromaShift;
 uniform float u_tubeWidth;
 uniform float u_rowStep;       // one scanline step in UV-Y space
+uniform float u_colStep;       // one column step in UV-X space (for vertical scan)
 uniform float u_contactShadow; // 0=off, 1=full occlusion
 uniform float u_tubeAxis;      // 0=horizontal (Y offset), 1=vertical (X offset)
 uniform float u_fog;           // depth fog: darkens sunken lines
@@ -107,10 +111,13 @@ void main() {
   v_tubeT = a_tubeT;
 
   // Inter-line contact shadow: sample 2 rows above and below, take the worst occlusion
-  vec3 a1 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep,        0.0, 1.0))).rgb;
-  vec3 a2 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep * 2.0,  0.0, 1.0))).rgb;
-  vec3 b1 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep,        0.0, 1.0))).rgb;
-  vec3 b2 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep * 2.0,  0.0, 1.0))).rgb;
+  // Shadow sample direction: rows (Y) for horizontal scan, columns (X) for vertical
+  vec2 sOff1 = u_tubeAxis < 0.5 ? vec2(0.0, u_rowStep)       : vec2(u_colStep,       0.0);
+  vec2 sOff2 = u_tubeAxis < 0.5 ? vec2(0.0, u_rowStep * 2.0) : vec2(u_colStep * 2.0, 0.0);
+  vec3 a1 = texture(u_depthTex, clamp(a_uv - sOff1, vec2(0.0), vec2(1.0))).rgb;
+  vec3 a2 = texture(u_depthTex, clamp(a_uv - sOff2, vec2(0.0), vec2(1.0))).rgb;
+  vec3 b1 = texture(u_depthTex, clamp(a_uv + sOff1, vec2(0.0), vec2(1.0))).rgb;
+  vec3 b2 = texture(u_depthTex, clamp(a_uv + sOff2, vec2(0.0), vec2(1.0))).rgb;
   float nAbove = max((a1.r+a1.g+a1.b)/3.0, (a2.r+a2.g+a2.b)/3.0);
   float nBelow = max((b1.r+b1.g+b1.b)/3.0, (b2.r+b2.g+b2.b)/3.0);
   float occl   = clamp((max(nAbove, nBelow) - brightDepth) * 12.0, 0.0, 1.0);
@@ -160,14 +167,14 @@ out vec4 fragColor;
 
 vec3 applyPalette(vec3 col, int pal) {
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
-  if (pal == 1) return mix(vec3(0.0), vec3(0.15, 1.0, 0.15), lum);   // phosphor green
+  if (pal == 1) return mix(vec3(0.0), vec3(0.12, 1.0, 0.18), lum);   // phosphor green (P31)
   if (pal == 2) {                                                       // thermal
     if (lum < 0.25) return mix(vec3(0.0,0.0,0.0), vec3(0.5,0.0,0.8), lum * 4.0);
     if (lum < 0.5)  return mix(vec3(0.5,0.0,0.8), vec3(1.0,0.0,0.0), (lum-0.25)*4.0);
     if (lum < 0.75) return mix(vec3(1.0,0.0,0.0), vec3(1.0,0.6,0.0), (lum-0.5) *4.0);
                     return mix(vec3(1.0,0.6,0.0), vec3(1.0,1.0,0.8), (lum-0.75)*4.0);
   }
-  if (pal == 3) return mix(vec3(0.0), vec3(0.06, 1.0, 0.85), lum);   // oscilloscope
+  if (pal == 3) return mix(vec3(0.0), vec3(0.04, 0.98, 0.90), lum);  // oscilloscope cyan
   if (pal == 4) return mix(vec3(0.0), vec3(1.0, 0.8, 0.5),   lum);   // sepia
   if (pal == 5) {                                                       // rainbow
     float h = lum * 6.0;
@@ -187,11 +194,11 @@ void main() {
   vec3 N = vec3(0.0, sint, sqrt(max(0.0, 1.0 - sint*sint)));
   vec3 L = normalize(vec3(0.3, 0.7, 1.0));
   float diffuse = max(0.0, dot(N, L));
-  float spec    = pow(max(0.0, N.z), 24.0);
-  float shade   = mix(1.0, 0.55 + diffuse * 0.45 + spec * 0.25, clamp(u_sheen, 0.0, 1.0));
+  float spec    = pow(max(0.0, N.z), 32.0);
+  float shade   = mix(1.0, 0.50 + diffuse * 0.46 + spec * 0.30, clamp(u_sheen, 0.0, 1.0));
   vec3 lit = v_color.rgb * shade * v_shadow;
-  // depth fog: sunken/dark lines (v_z ≈ 0) fade to black
-  lit *= (1.0 - u_fog * (1.0 - v_z) * 0.88);
+  // depth fog: dark/sunken lines fade fully to black
+  lit *= (1.0 - u_fog * (1.0 - v_z));
   // color palette
   vec3 palCol = applyPalette(lit, u_palette);
   fragColor = vec4(clamp(mix(lit, palCol, u_paletteAmt), 0.0, 1.0), 1.0);
@@ -238,18 +245,21 @@ void main() {
 }
 `;
 
-// --- Composite: scene + additive bloom ---------------------------------------
+// --- Composite: scene + two-level screen-blend bloom -------------------------
 const COMPOSITE_FRAG = `#version 300 es
 precision mediump float;
 in vec2 v_uv;
 uniform sampler2D u_scene;
-uniform sampler2D u_bloom;
+uniform sampler2D u_bloom0;  // tight glow  (CW/4)
+uniform sampler2D u_bloom1;  // soft halo   (CW/8)
 uniform float u_bloomAmt;
 out vec4 fragColor;
 void main() {
-  vec3 s = texture(u_scene, v_uv).rgb;
-  vec3 b = texture(u_bloom, v_uv).rgb;
-  fragColor = vec4(clamp(s + b * u_bloomAmt * 2.0, 0.0, 1.0), 1.0);
+  vec3 s = texture(u_scene,  v_uv).rgb;
+  vec3 b = (texture(u_bloom0, v_uv).rgb * 0.60
+          + texture(u_bloom1, v_uv).rgb * 0.40) * u_bloomAmt * 2.0;
+  // Screen blend: glows without blowing out highlights
+  fragColor = vec4(clamp(1.0 - (1.0 - s) * (1.0 - b), 0.0, 1.0), 1.0);
 }
 `;
 
@@ -261,7 +271,9 @@ let smoothW = -1, smoothH = -1;
 // --- Scene FBO + bloom globals -----------------------------------------------
 let sceneFBO = null, sceneTex = null, sceneDepth = null, sceneCW = -1, sceneCH = -1;
 let blurProg, compositeProg;
-let bloomTex = [null, null], bloomFBO = [null, null], bloomW = -1, bloomH = -1;
+// Two-level bloom pyramid: [level][pingpong] — level 0 = CW/4, level 1 = CW/8
+let bloomTex = [[null,null],[null,null]], bloomFBO = [[null,null],[null,null]];
+let bloomDims = [[-1,-1],[-1,-1]]; // [[w,h], [w,h]] per level
 
 // --- Column VBO globals ------------------------------------------------------
 let colVAO, colVBO;
@@ -382,23 +394,23 @@ function buildSceneFBO(w, h) {
   sceneCW = w; sceneCH = h;
 }
 
-function buildBloomFBOs(w, h) {
+function buildBloomLevel(lv, w, h) {
   for (let i = 0; i < 2; i++) {
-    if (bloomTex[i]) gl2.deleteTexture(bloomTex[i]);
-    if (bloomFBO[i]) gl2.deleteFramebuffer(bloomFBO[i]);
-    bloomTex[i] = gl2.createTexture();
-    gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[i]);
+    if (bloomTex[lv][i]) gl2.deleteTexture(bloomTex[lv][i]);
+    if (bloomFBO[lv][i]) gl2.deleteFramebuffer(bloomFBO[lv][i]);
+    bloomTex[lv][i] = gl2.createTexture();
+    gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[lv][i]);
     gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA8, w, h, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, null);
     gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR);
     gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR);
     gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE);
     gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE);
-    bloomFBO[i] = gl2.createFramebuffer();
-    gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[i]);
-    gl2.framebufferTexture2D(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, gl2.TEXTURE_2D, bloomTex[i], 0);
+    bloomFBO[lv][i] = gl2.createFramebuffer();
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[lv][i]);
+    gl2.framebufferTexture2D(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, gl2.TEXTURE_2D, bloomTex[lv][i], 0);
   }
   gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
-  bloomW = w; bloomH = h;
+  bloomDims[lv] = [w, h];
 }
 
 function buildBlurProg() {
@@ -787,7 +799,9 @@ function renderLoop() {
 
   gl2.useProgram(prog);
 
-  const ul = loc => gl2.getUniformLocation(prog, loc);
+  const ul = name => name in progUniCache
+    ? progUniCache[name]
+    : (progUniCache[name] = gl2.getUniformLocation(prog, name));
   gl2.uniformMatrix4fv(ul('u_mvp'),          false, mvp);
   gl2.uniform2f(ul('u_srcSize'),             srcW, srcH);
   gl2.uniform1f(ul('u_depth'),               depth);
@@ -801,6 +815,7 @@ function renderLoop() {
   gl2.uniform1f(ul('u_sheen'),               sheen);
   gl2.uniform1f(ul('u_contactShadow'),       contact);
   gl2.uniform1f(ul('u_rowStep'),             step / srcH);
+  gl2.uniform1f(ul('u_colStep'),             step / srcW);
   gl2.uniform1f(ul('u_fog'),                 fog);
   gl2.uniform1i(ul('u_palette'),             paletteIdx);
   gl2.uniform1f(ul('u_paletteAmt'),          paletteAmt);
@@ -837,36 +852,63 @@ function renderLoop() {
     gl2.bindVertexArray(null);
   }
 
-  // --- Bloom pass (blur at 1/4 res, composite additively) ------------------
-  const bw = Math.max(1, Math.floor(CW / 4));
-  const bh = Math.max(1, Math.floor(CH / 4));
-  if (bw !== bloomW || bh !== bloomH) buildBloomFBOs(bw, bh);
+  // --- Bloom: two-level pyramid (skip blur passes when bloomAmt ≈ 0) ----------
+  const bw0 = Math.max(1, Math.floor(CW / 4));
+  const bh0 = Math.max(1, Math.floor(CH / 4));
+  const bw1 = Math.max(1, Math.floor(CW / 8));
+  const bh1 = Math.max(1, Math.floor(CH / 8));
+  if (bloomDims[0][0] !== bw0 || bloomDims[0][1] !== bh0) buildBloomLevel(0, bw0, bh0);
+  if (bloomDims[1][0] !== bw1 || bloomDims[1][1] !== bh1) buildBloomLevel(1, bw1, bh1);
 
-  gl2.disable(gl2.DEPTH_TEST);
-  gl2.bindVertexArray(quadVAO);
-  gl2.useProgram(blurProg);
-  // H blur: sceneTex → bloomFBO[0]
-  gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[0]);
-  gl2.viewport(0, 0, bw, bh);
-  gl2.activeTexture(gl2.TEXTURE0); gl2.bindTexture(gl2.TEXTURE_2D, sceneTex);
-  gl2.uniform1i(gl2.getUniformLocation(blurProg, 'u_tex'), 0);
-  gl2.uniform2f(gl2.getUniformLocation(blurProg, 'u_dir'), 1.0 / bw, 0.0);
-  gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
-  // V blur: bloomTex[0] → bloomFBO[1]
-  gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[1]);
-  gl2.activeTexture(gl2.TEXTURE0); gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[0]);
-  gl2.uniform2f(gl2.getUniformLocation(blurProg, 'u_dir'), 0.0, 1.0 / bh);
-  gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+  if (bloomAmt > 0.001) {
+    gl2.disable(gl2.DEPTH_TEST);
+    gl2.bindVertexArray(quadVAO);
+    gl2.useProgram(blurProg);
+    const bul = name => name in blurUniCache
+      ? blurUniCache[name]
+      : (blurUniCache[name] = gl2.getUniformLocation(blurProg, name));
+    gl2.activeTexture(gl2.TEXTURE0);
+    gl2.uniform1i(bul('u_tex'), 0);
+    // Level 0 H: sceneTex → bloomFBO[0][0]
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[0][0]);
+    gl2.viewport(0, 0, bw0, bh0);
+    gl2.bindTexture(gl2.TEXTURE_2D, sceneTex);
+    gl2.uniform2f(bul('u_dir'), 1.0/bw0, 0.0);
+    gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+    // Level 0 V: bloomTex[0][0] → bloomFBO[0][1]
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[0][1]);
+    gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[0][0]);
+    gl2.uniform2f(bul('u_dir'), 0.0, 1.0/bh0);
+    gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+    // Level 1 H: bloomTex[0][1] → bloomFBO[1][0]
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[1][0]);
+    gl2.viewport(0, 0, bw1, bh1);
+    gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[0][1]);
+    gl2.uniform2f(bul('u_dir'), 1.0/bw1, 0.0);
+    gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+    // Level 1 V: bloomTex[1][0] → bloomFBO[1][1]
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[1][1]);
+    gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[1][0]);
+    gl2.uniform2f(bul('u_dir'), 0.0, 1.0/bh1);
+    gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+  }
 
   // --- Composite scene + bloom → default FBO --------------------------------
   gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
   gl2.viewport(0, 0, CW, CH);
+  gl2.disable(gl2.DEPTH_TEST);
+  gl2.bindVertexArray(quadVAO);
   gl2.useProgram(compositeProg);
+  const cul = name => name in compUniCache
+    ? compUniCache[name]
+    : (compUniCache[name] = gl2.getUniformLocation(compositeProg, name));
   gl2.activeTexture(gl2.TEXTURE0); gl2.bindTexture(gl2.TEXTURE_2D, sceneTex);
-  gl2.uniform1i(gl2.getUniformLocation(compositeProg, 'u_scene'), 0);
-  gl2.activeTexture(gl2.TEXTURE1); gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[1]);
-  gl2.uniform1i(gl2.getUniformLocation(compositeProg, 'u_bloom'), 1);
-  gl2.uniform1f(gl2.getUniformLocation(compositeProg, 'u_bloomAmt'), bloomAmt);
+  gl2.uniform1i(cul('u_scene'), 0);
+  gl2.activeTexture(gl2.TEXTURE1); gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[0][1]);
+  gl2.uniform1i(cul('u_bloom0'), 1);
+  gl2.activeTexture(gl2.TEXTURE2); gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[1][1]);
+  gl2.uniform1i(cul('u_bloom1'), 2);
+  gl2.uniform1f(cul('u_bloomAmt'), bloomAmt);
   gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
   gl2.bindVertexArray(null);
 }
