@@ -851,12 +851,16 @@ function renderLoop() {
 
   const mvp = mat4Mul(ortho, m);
 
-  // --- Scene FBO: rebuild if canvas size changed ----------------------------
-  if (CW !== sceneCW || CH !== sceneCH) buildSceneFBO(CW, CH);
+  // --- Scene FBO: 2× SSAA — render at double display resolution so sub-pixel
+  //     scan lines get proper coverage, then bilinear downsample in composite.
+  //     Cap at 4K so we don't go nuts on very high-DPI displays.
+  const ssaW = Math.min(3840, CW * 2);
+  const ssaH = Math.min(2160, CH * 2);
+  if (ssaW !== sceneCW || ssaH !== sceneCH) buildSceneFBO(ssaW, ssaH);
 
   // --- Main draw → sceneFBO ------------------------------------------------
   gl2.bindFramebuffer(gl2.FRAMEBUFFER, sceneFBO);
-  gl2.viewport(0, 0, CW, CH);
+  gl2.viewport(0, 0, ssaW, ssaH);
   gl2.clearColor(0, 0, 0, 1);
   gl2.clear(gl2.COLOR_BUFFER_BIT | gl2.DEPTH_BUFFER_BIT);
   gl2.enable(gl2.DEPTH_TEST);
