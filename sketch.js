@@ -642,6 +642,7 @@ function setup() {
   lfoOffsetX    = select("#lfoOffsetX");
   lfoOffsetY    = select("#lfoOffsetY");
 
+  select("#resetParamsBtn").mousePressed(resetParams);
   downloadBtn = select("#downloadBtn");
   downloadBtn.mousePressed(saveImage);
 
@@ -1149,6 +1150,43 @@ function handleImageUpload() {
       uploadedMedia = img; uploadedType = 'image'; currentSourceReady = true;
     }, e => console.error('Image error:', e));
   }
+}
+
+function resetParams() {
+  const defaults = [
+    ['#depthSlider',      '0'],
+    ['#tiltXSlider',      '0'],
+    ['#tiltYSlider',      '0'],
+    ['#scaleSlider',      '1'],
+    ['#densitySlider',    '6'],
+    ['#gammaSlider',      '2.2'],
+    ['#chromaSlider',     '0'],
+    ['#sheenSlider',      '0'],
+    ['#contactSlider',    '0'],
+    ['#fogSlider',        '0'],
+    ['#bloomSlider',      '0'],
+    ['#paletteAmtSlider', '0'],
+    ['#depthSmoothSlider','0'],
+    ['#temporalSlider',   '1'],
+    ['#shapeXSlider',     '0'],
+    ['#shapeYSlider',     '0'],
+    ['#waveAmpSlider',    '0'],
+    ['#waveFreqSlider',   '0'],
+    ['#horizAmpSlider',   '1'],
+    ['#vertAmpSlider',    '1'],
+    ['#offsetXSlider',    '0'],
+    ['#offsetYSlider',    '0'],
+    ['#lfoFreq',          '0.3'],
+    ['#lfoAmp',           '0.5'],
+  ];
+  defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
+  document.querySelector('#paletteSelect').value  = '0';
+  document.querySelector('#scanModeSelect').value = 'H';
+  document.querySelector('#lfoType').value        = 'saw';
+  ['#lfoDepth','#lfoTiltX','#lfoTiltY','#lfoScale',
+   '#lfoShapeX','#lfoShapeY','#lfoWaveAmp','#lfoWaveFreq',
+   '#lfoHorizAmp','#lfoVertAmp','#lfoOffsetX','#lfoOffsetY']
+    .forEach(sel => { document.querySelector(sel).checked = false; });
 }
 
 function handleVideoUpload() {
