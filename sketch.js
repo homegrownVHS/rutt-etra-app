@@ -20,6 +20,7 @@ let lfoOffsetX, lfoOffsetY;
 
 // --- FX globals --------------------------------------------------------------
 let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect, temporalSlider, depthSmoothSlider;
+let fovSlider, lightAmtSlider, lightAzSlider, lightElSlider;
 
 // Uniform location caches – populated on first use, valid for program lifetime
 let progUniCache = {}, blurUniCache = {}, compUniCache = {};
@@ -66,6 +67,8 @@ uniform float u_colStep;       // one column step in UV-X space (for vertical sc
 uniform float u_contactShadow; // 0=off, 1=full occlusion
 uniform float u_tubeAxis;      // 0=horizontal (Y offset), 1=vertical (X offset)
 uniform float u_fog;           // depth fog: darkens sunken lines
+uniform mat3  u_normalMat;     // rotation-only matrix for surface normal transform
+uniform float u_normalScale;   // depth-to-spatial scale for gradient steepness
 
 in float a_tubeT;
 
@@ -73,6 +76,7 @@ out vec4  v_color;
 out float v_tubeT;
 out float v_shadow;
 out float v_z;                 // per-vertex brightness (fog driver)
+out vec3  v_surfNormal;        // surface normal in view space
 
 uniform sampler2D u_tex;
 uniform sampler2D u_depthTex;
@@ -117,6 +121,18 @@ void main() {
   float nBelow = max((b1.r+b1.g+b1.b)/3.0, (b2.r+b2.g+b2.b)/3.0);
   float occl   = clamp((max(nAbove, nBelow) - brightDepth) * 12.0, 0.0, 1.0);
   v_shadow = 1.0 - u_contactShadow * occl * 0.88;
+
+  // Surface normal from depth gradient (cross-direction samples)
+  vec2 sCross1 = u_tubeAxis < 0.5 ? vec2(u_colStep, 0.0) : vec2(0.0, u_rowStep);
+  vec3 cxNear = texture(u_depthTex, clamp(a_uv - sCross1, vec2(0.0), vec2(1.0))).rgb;
+  vec3 cxFar  = texture(u_depthTex, clamp(a_uv + sCross1, vec2(0.0), vec2(1.0))).rgb;
+  float bA1    = (a1.r+a1.g+a1.b)/3.0;
+  float bB1    = (b1.r+b1.g+b1.b)/3.0;
+  float dAlong = bB1 - bA1;
+  float dCross = (cxFar.r+cxFar.g+cxFar.b)/3.0 - (cxNear.r+cxNear.g+cxNear.b)/3.0;
+  float gX = u_tubeAxis < 0.5 ? dCross : dAlong;
+  float gY = u_tubeAxis < 0.5 ? dAlong : dCross;
+  v_surfNormal = normalize(u_normalMat * normalize(vec3(-gX * u_normalScale, -gY * u_normalScale, 1.0)));
 
   float nx = a_uv.x;
   float ny = a_uv.y;
@@ -174,10 +190,14 @@ in vec4  v_color;
 in float v_tubeT;
 in float v_shadow;
 in float v_z;
+in vec3  v_surfNormal;
 uniform float u_sheen;
 uniform float u_fog;
 uniform int   u_palette;
 uniform float u_paletteAmt;
+uniform float u_lightAmt;
+uniform float u_lightAz;
+uniform float u_lightEl;
 out vec4 fragColor;
 
 vec3 applyPalette(vec3 col, int pal) {
@@ -214,6 +234,13 @@ void main() {
   vec3 lit = v_color.rgb * shade * v_shadow;
   // depth fog: dark/sunken lines fade fully to black
   lit *= (1.0 - u_fog * (1.0 - v_z));
+  // Surface normal lighting
+  vec3 Ls = normalize(vec3(cos(u_lightEl)*sin(u_lightAz), cos(u_lightEl)*cos(u_lightAz), sin(u_lightEl)));
+  vec3 surfN = normalize(v_surfNormal);
+  float surf_diff = max(0.0, dot(surfN, Ls));
+  float surf_spec = pow(max(0.0, dot(reflect(-Ls, surfN), vec3(0.0, 0.0, 1.0))), 16.0);
+  float surf_shade = clamp(0.15 + surf_diff * 0.75 + surf_spec * 0.30, 0.0, 2.5);
+  lit = mix(lit, lit * surf_shade, u_lightAmt);
   // color palette
   vec3 palCol = applyPalette(lit, u_palette);
   fragColor = vec4(clamp(mix(lit, palCol, u_paletteAmt), 0.0, 1.0), 1.0);
@@ -631,6 +658,10 @@ function setup() {
   scanModeSelect   = select("#scanModeSelect");
   temporalSlider   = select("#temporalSlider");
   depthSmoothSlider = select("#depthSmoothSlider");
+  fovSlider        = select("#fovSlider");
+  lightAmtSlider   = select("#lightAmtSlider");
+  lightAzSlider    = select("#lightAzSlider");
+  lightElSlider    = select("#lightElSlider");
 
   horizAmpSlider = select("#horizAmpSlider");
   vertAmpSlider  = select("#vertAmpSlider");
@@ -840,6 +871,10 @@ function renderLoop() {
   const scanMode      = scanModeSelect.value(); // 'H', 'V', or 'X'
   const temporal      = Number(temporalSlider.value());
   const depthSmooth   = Number(depthSmoothSlider.value()); // 0-20 pixel radius
+  const fovDeg        = Number(fovSlider.value());
+  const lightAmt      = Number(lightAmtSlider.value());
+  const lightAz       = Number(lightAzSlider.value()) * Math.PI / 180.0;
+  const lightEl       = Number(lightElSlider.value()) * Math.PI / 180.0;
 
   // Update video scrubber
   if (uploadedType === 'video' && uploadedMedia) {
@@ -875,6 +910,10 @@ function renderLoop() {
   select("#vertAmpLabel").html(vertAmp.toFixed(1));
   select("#offsetXLabel").html(offsetX.toFixed(0));
   select("#offsetYLabel").html(offsetY.toFixed(0));
+  select("#fovLabel").html(fovDeg + '\u00B0');
+  select("#lightAmtLabel").html(lightAmt.toFixed(2));
+  select("#lightAzLabel").html(Math.round(lightAz * 180 / Math.PI) + '\u00B0');
+  select("#lightElLabel").html(Math.round(lightEl * 180 / Math.PI) + '\u00B0');
   // Smooth rotation
   rotX += (targetRotX - rotX) * 0.1;
   rotY += (targetRotY - rotY) * 0.1;
@@ -964,16 +1003,39 @@ function renderLoop() {
   m = mat4Mul(rotY4(rotY + tiltY), m);
   m = mat4Mul(scale4(scl * sf), m);
 
-  // Orthographic projection: canvas-pixel space -> NDC, +y points down (p5 WEBGL default)
+  // Projection: ortho at fov=0, perspective at fov>0
   const hw = CW / 2, hh = CH / 2;
-  const ortho = new Float32Array([
-    1/hw,  0,      0,  0,
-    0,    -1/hh,   0,  0,
-    0,     0,  1/10000, 0,
-    0,     0,      0,  1
-  ]);
+  let proj;
+  if (fovDeg < 0.5) {
+    proj = new Float32Array([
+      1/hw,  0,      0,       0,
+      0,    -1/hh,   0,       0,
+      0,     0,      1/10000, 0,
+      0,     0,      0,       1
+    ]);
+  } else {
+    const D = hh / Math.tan(fovDeg * Math.PI / 360.0);
+    // column-major: clip_w = D - z  →  perspective divide gives x/(hw*(1-z/D))
+    proj = new Float32Array([
+      D/hw, 0,     0,        0,
+      0,   -D/hh,  0,        0,
+      0,    0,     D/10000, -1,
+      0,    0,     0,        D
+    ]);
+  }
 
-  const mvp = mat4Mul(ortho, m);
+  const mvp = mat4Mul(proj, m);
+
+  // Normal matrix: rotation only (no scale/translate) for surface lighting
+  const rotOnly   = mat4Mul(rotX4(rotX + tiltX), rotY4(rotY + tiltY));
+  const normalMat3 = new Float32Array([
+    rotOnly[0], rotOnly[1], rotOnly[2],
+    rotOnly[4], rotOnly[5], rotOnly[6],
+    rotOnly[8], rotOnly[9], rotOnly[10]
+  ]);
+  const normalScale = (step > 0 && horizAmp > 0)
+    ? Math.abs(depth) / (step * Math.max(horizAmp, 0.01))
+    : 0.0;
 
   // --- Scene FBO: 2× SSAA — render at double display resolution so sub-pixel
   //     scan lines get proper coverage, then bilinear downsample in composite.
@@ -1012,6 +1074,11 @@ function renderLoop() {
   gl2.uniform1f(ul('u_fog'),                 fog);
   gl2.uniform1i(ul('u_palette'),             paletteIdx);
   gl2.uniform1f(ul('u_paletteAmt'),          paletteAmt);
+  gl2.uniformMatrix3fv(ul('u_normalMat'),    false, normalMat3);
+  gl2.uniform1f(ul('u_normalScale'),         normalScale);
+  gl2.uniform1f(ul('u_lightAmt'),            lightAmt);
+  gl2.uniform1f(ul('u_lightAz'),             lightAz);
+  gl2.uniform1f(ul('u_lightEl'),             lightEl);
   // tube fill: sheen=0 -> fills gap (0.48), sheen=1 -> tight line (0.09)
   const tubeFill       = 0.48 - Math.min(sheen, 1.0) * 0.39;
   const tubeHalfNDC    = (step * scl * sf * vertAmp)  / (CH / 2) * tubeFill;
@@ -1178,6 +1245,10 @@ function resetParams() {
     ['#offsetYSlider',    '0'],
     ['#lfoFreq',          '0.3'],
     ['#lfoAmp',           '0.5'],
+    ['#fovSlider',        '0'],
+    ['#lightAmtSlider',   '0'],
+    ['#lightAzSlider',    '45'],
+    ['#lightElSlider',    '45'],
   ];
   defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
   document.querySelector('#paletteSelect').value  = '0';
