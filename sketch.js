@@ -525,7 +525,8 @@ function setup() {
   canvas.height = 2160;
   canvas.style.display = 'block';
   canvas.style.margin  = '0 auto';
-  canvas.style.maxWidth = '100%';
+  canvas.style.width   = '100%';
+  canvas.style.height  = 'auto';
   const main = document.querySelector('main') || document.body;
   main.insertBefore(canvas, main.firstChild);
   window._gpuCanvas = canvas;
@@ -781,7 +782,26 @@ function renderLoop() {
   rotY += (targetRotY - rotY) * 0.1;
 
   const srcW = src.width, srcH = src.height;
-  const CW = 3840, CH = 2160;
+
+  // Render at actual display pixels to eliminate Moiré from browser downscaling.
+  // Export mode always uses full 4K for high-res frames.
+  {
+    const gpuCanvas = window._gpuCanvas;
+    const dpr     = window.devicePixelRatio || 1;
+    const dispW   = gpuCanvas.clientWidth || 1280;
+    const targetW = exportMode
+      ? 3840
+      : Math.min(3840, Math.max(320, Math.round(dispW * dpr)));
+    const targetH = Math.round(targetW * 9 / 16);
+    if (gpuCanvas.width !== targetW || gpuCanvas.height !== targetH) {
+      gpuCanvas.width  = targetW;
+      gpuCanvas.height = targetH;
+      sceneCW = sceneCH = -1;        // force scene FBO rebuild
+      bloomDims = [[-1,-1],[-1,-1]]; // force bloom FBO rebuild
+    }
+  }
+  const CW = window._gpuCanvas.width;
+  const CH = window._gpuCanvas.height;
 
   buildScanlineVBO(srcW, srcH, step);
   updateTexture(src);
