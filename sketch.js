@@ -83,11 +83,6 @@ float applyGamma(float v, float g) {
   return pow(clamp(v, 0.0, 1.0), 1.0 / g);
 }
 
-float parabolicBend(float n, float s) {
-  float c = 0.5;
-  return s * (n - c) * (n - c);
-}
-
 void main() {
   vec2 sz = u_srcSize;
 
@@ -126,23 +121,37 @@ void main() {
   float nx = a_uv.x;
   float ny = a_uv.y;
 
-  float horizBend = parabolicBend(ny, u_shapeX);
-  float vertBend  = parabolicBend(nx, u_shapeY);
-
   float scaleWaveX = u_waveAmp * (sz.x / 640.0);
   float scaleWaveY = u_waveAmp * (sz.y / 480.0);
   float waveX = scaleWaveX * sin(ny * PI * 2.0 * u_waveFreq);
   float waveY = scaleWaveY * sin(nx * PI * 2.0 * u_waveFreq);
 
-  float px = nx * sz.x * u_horizVert.x + waveX;
-  float py = ny * sz.y * u_horizVert.y
-           + vertBend  * sz.y
-           + horizBend * sz.x
-           + waveY;
+  // --- Sphere wrap ---------------------------------------------------------
+  // shapeX (0-1): folds left/right edges backward (horizontal cylinder)
+  // shapeY (0-1): folds top/bottom edges backward (vertical cylinder)
+  // At shapeX=shapeY=1 the raster forms a closed sphere.
+  float W  = sz.x * u_horizVert.x;
+  float H  = sz.y * u_horizVert.y;
+  float Rx = W / (2.0 * PI);  // radius preserving arc length
+  float Ry = H / (2.0 * PI);
+
+  float phiX   = (nx - 0.5) * 2.0 * PI;          // -pi..+pi across width
+  float pxWrap = 0.5 * W + Rx * sin(phiX);
+  float fzX    = Rx * (1.0 - cos(phiX));          // 0 at centre, 2Rx at edges
+
+  float phiY   = (ny - 0.5) * 2.0 * PI;          // -pi..+pi across height
+  float pyWrap = 0.5 * H + Ry * sin(phiY);
+  float fzY    = Ry * (1.0 - cos(phiY));
+
+  float px = mix(nx * W, pxWrap, u_shapeX) + waveX;
+  float py = mix(ny * H, pyWrap, u_shapeY) + waveY;
+  // subtract fold so edges recede away from viewer
+  float foldZ = mix(0.0, fzX, u_shapeX) + mix(0.0, fzY, u_shapeY);
 
   float depth = u_depth;
   float z = (gammaBright * 2.0 - 1.0) * abs(depth);
   if (depth < 0.0) z *= -1.0;
+  z -= foldZ;
 
   vec4 clipPos = u_mvp * vec4(px, py, z, 1.0);
   clipPos.x += a_tubeT * u_tubeWidth *        u_tubeAxis;
@@ -733,8 +742,9 @@ function renderLoop() {
   const tiltY  = baseTiltY + (lfoTiltY.checked() ? lfo * Math.PI * lfoAmp : 0);
   const scl    = baseScale + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
 
-  const shapeX   = Number(shapeXSlider.value())  + (lfoShapeX.checked()  ? lfo * 5 * lfoAmp : 0);
-  const shapeY   = Number(shapeYSlider.value())  + (lfoShapeY.checked()  ? lfo * 5 * lfoAmp : 0);
+  // Slider is 0-100; normalise to 0-1 for shader
+  const shapeX   = Math.max(0, Math.min(1, (Number(shapeXSlider.value()) + (lfoShapeX.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
+  const shapeY   = Math.max(0, Math.min(1, (Number(shapeYSlider.value()) + (lfoShapeY.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
   const waveAmp  = Number(waveAmpSlider.value()) + (lfoWaveAmp.checked() ? lfo * 200 * lfoAmp : 0);
   const waveFreq = Math.max(0, Number(waveFreqSlider.value()) + (lfoWaveFreq.checked() ? lfo * 20 * lfoAmp : 0));
 
@@ -761,8 +771,8 @@ function renderLoop() {
   select("#tiltYLabel").html(tiltYSlider.value() + "\u00B0");
   select("#scaleLabel").html(scl.toFixed(2));
   select("#densityLabel").html(step);
-  select("#shapeXLabel").html(shapeX.toFixed(1));
-  select("#shapeYLabel").html(shapeY.toFixed(1));
+  select("#shapeXLabel").html(Math.round(shapeX * 100));
+  select("#shapeYLabel").html(Math.round(shapeY * 100));
   select("#waveAmpLabel").html(waveAmp.toFixed(1));
   select("#waveFreqLabel").html(waveFreq.toFixed(1));
   select("#gammaLabel").html(gamma.toFixed(1));
