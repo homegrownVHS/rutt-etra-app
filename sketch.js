@@ -323,8 +323,8 @@ function setup() {
 
   // Our own WebGL2 canvas
   const canvas = document.createElement('canvas');
-  canvas.width  = 1920;
-  canvas.height = 1080;
+  canvas.width  = 3840;
+  canvas.height = 2160;
   canvas.style.display = 'block';
   canvas.style.margin  = '0 auto';
   canvas.style.maxWidth = '100%';
@@ -518,7 +518,7 @@ function renderLoop() {
   rotY += (targetRotY - rotY) * 0.1;
 
   const srcW = src.width, srcH = src.height;
-  const CW = 1920, CH = 1080;
+  const CW = 3840, CH = 2160;
 
   buildScanlineVBO(srcW, srcH, step);
   updateTexture(src);
