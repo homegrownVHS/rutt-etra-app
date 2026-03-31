@@ -155,9 +155,9 @@ void main() {
   vec3 N = vec3(0.0, sint, cost);                   // tube surface normal
   vec3 L = normalize(vec3(0.3, 0.7, 1.0));          // light: right, up, toward camera
   float diffuse = max(0.0, dot(N, L));
-  float spec    = pow(max(0.0, N.z), 24.0);          // tight specular, less blown-out
-  // ambient + diffuse + specular; sheen=0 -> flat colour, sheen=1 -> full tube shading
-  float shade = mix(1.0, 0.08 + diffuse * 0.55 + spec * 0.18, u_sheen);
+  float spec    = pow(max(0.0, N.z), 24.0);
+  // ambient raised so the lit face of the tube stays bright; sheen clamped so >1 doesn't go dark
+  float shade = mix(1.0, 0.55 + diffuse * 0.45 + spec * 0.25, clamp(u_sheen, 0.0, 1.0));
   fragColor = vec4(clamp(v_color.rgb * shade * v_shadow, 0.0, 1.0), 1.0);
 }
 `;
