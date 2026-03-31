@@ -19,7 +19,7 @@ let offsetXSlider, offsetYSlider;
 let lfoOffsetX, lfoOffsetY;
 
 // --- FX globals --------------------------------------------------------------
-let chromaSlider, sheenSlider;
+let chromaSlider, sheenSlider, contactSlider;
 
 let currentSourceReady = false;
 let selectedDeviceId = null;
@@ -58,11 +58,14 @@ uniform float u_waveAmp;
 uniform float u_waveFreq;
 uniform float u_chromaShift;
 uniform float u_tubeWidth;
+uniform float u_rowStep;       // one scanline step in UV-Y space
+uniform float u_contactShadow; // 0=off, 1=full occlusion
 
 in float a_tubeT;
 
-out vec4 v_color;
+out vec4  v_color;
 out float v_tubeT;
+out float v_shadow;
 
 uniform sampler2D u_tex;
 uniform sampler2D u_depthTex;
@@ -100,6 +103,16 @@ void main() {
                  1.0);
   v_tubeT = a_tubeT;
 
+  // Inter-line contact shadow: if neighbors are higher (closer), this line sits in shadow
+  float above = (texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep, 0.0, 1.0))).r +
+                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep, 0.0, 1.0))).g +
+                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep, 0.0, 1.0))).b) / 3.0;
+  float below = (texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep, 0.0, 1.0))).r +
+                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep, 0.0, 1.0))).g +
+                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep, 0.0, 1.0))).b) / 3.0;
+  float occl = clamp((max(above, below) - brightDepth) * 4.0, 0.0, 1.0);
+  v_shadow = 1.0 - u_contactShadow * occl * 0.75;
+
   float nx = a_uv.x;
   float ny = a_uv.y;
 
@@ -132,6 +145,7 @@ const FRAG_SRC = `#version 300 es
 precision mediump float;
 in vec4  v_color;
 in float v_tubeT;    // -1 = tube bottom edge, 0 = facing camera, +1 = tube top edge
+in float v_shadow;   // inter-line contact shadow factor (1=lit, <1=occluded)
 uniform float u_sheen;
 out vec4 fragColor;
 void main() {
@@ -144,7 +158,7 @@ void main() {
   float spec    = pow(max(0.0, N.z), 24.0);          // tight specular, less blown-out
   // ambient + diffuse + specular; sheen=0 -> flat colour, sheen=1 -> full tube shading
   float shade = mix(1.0, 0.08 + diffuse * 0.55 + spec * 0.18, u_sheen);
-  fragColor = vec4(clamp(v_color.rgb * shade, 0.0, 1.0), 1.0);
+  fragColor = vec4(clamp(v_color.rgb * shade * v_shadow, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -380,8 +394,9 @@ function setup() {
   gammaSlider = select("#gammaSlider");
   gammaLabel  = select("#gammaLabel");
 
-  chromaSlider = select("#chromaSlider");
-  sheenSlider  = select("#sheenSlider");
+  chromaSlider  = select("#chromaSlider");
+  sheenSlider   = select("#sheenSlider");
+  contactSlider = select("#contactSlider");
   temporalSlider = select("#temporalSlider");
 
   horizAmpSlider = select("#horizAmpSlider");
@@ -492,8 +507,9 @@ function renderLoop() {
 
   const gamma = Math.max(0.01, Number(gammaSlider.value()));
   const chromaShift = Number(chromaSlider.value());
-  const sheen      = Number(sheenSlider.value());
-  const temporal   = Number(temporalSlider.value()); // 0=max smooth, 1=none
+  const sheen         = Number(sheenSlider.value());
+  const contact       = Number(contactSlider.value());
+  const temporal      = Number(temporalSlider.value()); // 0=max smooth, 1=none
 
   // Update labels
   select("#depthLabel").html(depth.toFixed(0));
@@ -508,6 +524,7 @@ function renderLoop() {
   select("#gammaLabel").html(gamma.toFixed(1));
   select("#chromaLabel").html(chromaShift.toFixed(3));
   select("#sheenLabel").html(sheen.toFixed(2));
+  select("#contactLabel").html(contact.toFixed(2));
   select("#temporalLabel").html(temporal.toFixed(2));
   select("#horizAmpLabel").html(horizAmp.toFixed(1));
   select("#vertAmpLabel").html(vertAmp.toFixed(1));
@@ -590,6 +607,8 @@ function renderLoop() {
   gl2.uniform1f(ul('u_waveFreq'),        waveFreq);
   gl2.uniform1f(ul('u_chromaShift'),     chromaShift);
   gl2.uniform1f(ul('u_sheen'),           sheen);
+  gl2.uniform1f(ul('u_contactShadow'),   contact);
+  gl2.uniform1f(ul('u_rowStep'),         step / srcH);
   // tube half-height in NDC: fills ~96% of the gap between scanlines
   const tubeHalfNDC = (step * scl * sf * vertAmp) / (CH / 2) * 0.48;
   gl2.uniform1f(ul('u_tubeWidth'),       tubeHalfNDC);
