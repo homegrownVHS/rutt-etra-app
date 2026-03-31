@@ -103,15 +103,15 @@ void main() {
                  1.0);
   v_tubeT = a_tubeT;
 
-  // Inter-line contact shadow: if neighbors are higher (closer), this line sits in shadow
-  float above = (texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep, 0.0, 1.0))).r +
-                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep, 0.0, 1.0))).g +
-                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep, 0.0, 1.0))).b) / 3.0;
-  float below = (texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep, 0.0, 1.0))).r +
-                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep, 0.0, 1.0))).g +
-                 texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep, 0.0, 1.0))).b) / 3.0;
-  float occl = clamp((max(above, below) - brightDepth) * 4.0, 0.0, 1.0);
-  v_shadow = 1.0 - u_contactShadow * occl * 0.75;
+  // Inter-line contact shadow: sample 2 rows above and below, take the worst occlusion
+  vec3 a1 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep,        0.0, 1.0))).rgb;
+  vec3 a2 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y - u_rowStep * 2.0,  0.0, 1.0))).rgb;
+  vec3 b1 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep,        0.0, 1.0))).rgb;
+  vec3 b2 = texture(u_depthTex, vec2(a_uv.x, clamp(a_uv.y + u_rowStep * 2.0,  0.0, 1.0))).rgb;
+  float nAbove = max((a1.r+a1.g+a1.b)/3.0, (a2.r+a2.g+a2.b)/3.0);
+  float nBelow = max((b1.r+b1.g+b1.b)/3.0, (b2.r+b2.g+b2.b)/3.0);
+  float occl   = clamp((max(nAbove, nBelow) - brightDepth) * 12.0, 0.0, 1.0);
+  v_shadow = 1.0 - u_contactShadow * occl * 0.88;
 
   float nx = a_uv.x;
   float ny = a_uv.y;
