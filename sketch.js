@@ -19,7 +19,7 @@ let offsetXSlider, offsetYSlider;
 let lfoOffsetX, lfoOffsetY;
 
 // --- FX globals --------------------------------------------------------------
-let chromaSlider, sheenSlider, contactSlider;
+let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect;
 
 let currentSourceReady = false;
 let selectedDeviceId = null;
@@ -60,12 +60,15 @@ uniform float u_chromaShift;
 uniform float u_tubeWidth;
 uniform float u_rowStep;       // one scanline step in UV-Y space
 uniform float u_contactShadow; // 0=off, 1=full occlusion
+uniform float u_tubeAxis;      // 0=horizontal (Y offset), 1=vertical (X offset)
+uniform float u_fog;           // depth fog: darkens sunken lines
 
 in float a_tubeT;
 
 out vec4  v_color;
 out float v_tubeT;
 out float v_shadow;
+out float v_z;                 // per-vertex brightness (fog driver)
 
 uniform sampler2D u_tex;
 uniform sampler2D u_depthTex;
@@ -135,7 +138,9 @@ void main() {
   if (depth < 0.0) z *= -1.0;
 
   vec4 clipPos = u_mvp * vec4(px, py, z, 1.0);
-  clipPos.y += a_tubeT * u_tubeWidth;
+  clipPos.x += a_tubeT * u_tubeWidth *        u_tubeAxis;
+  clipPos.y += a_tubeT * u_tubeWidth * (1.0 - u_tubeAxis);
+  v_z = gammaBright;
   gl_Position = clipPos;
 }
 `;
@@ -144,21 +149,52 @@ void main() {
 const FRAG_SRC = `#version 300 es
 precision mediump float;
 in vec4  v_color;
-in float v_tubeT;    // -1 = tube bottom edge, 0 = facing camera, +1 = tube top edge
-in float v_shadow;   // inter-line contact shadow factor (1=lit, <1=occluded)
+in float v_tubeT;
+in float v_shadow;
+in float v_z;
 uniform float u_sheen;
+uniform float u_fog;
+uniform int   u_palette;
+uniform float u_paletteAmt;
 out vec4 fragColor;
+
+vec3 applyPalette(vec3 col, int pal) {
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  if (pal == 1) return mix(vec3(0.0), vec3(0.15, 1.0, 0.15), lum);   // phosphor green
+  if (pal == 2) {                                                       // thermal
+    if (lum < 0.25) return mix(vec3(0.0,0.0,0.0), vec3(0.5,0.0,0.8), lum * 4.0);
+    if (lum < 0.5)  return mix(vec3(0.5,0.0,0.8), vec3(1.0,0.0,0.0), (lum-0.25)*4.0);
+    if (lum < 0.75) return mix(vec3(1.0,0.0,0.0), vec3(1.0,0.6,0.0), (lum-0.5) *4.0);
+                    return mix(vec3(1.0,0.6,0.0), vec3(1.0,1.0,0.8), (lum-0.75)*4.0);
+  }
+  if (pal == 3) return mix(vec3(0.0), vec3(0.06, 1.0, 0.85), lum);   // oscilloscope
+  if (pal == 4) return mix(vec3(0.0), vec3(1.0, 0.8, 0.5),   lum);   // sepia
+  if (pal == 5) {                                                       // rainbow
+    float h = lum * 6.0;
+    float x = lum * (1.0 - abs(mod(h, 2.0) - 1.0));
+    if (h < 1.0) return vec3(lum, x,   0.0);
+    if (h < 2.0) return vec3(x,   lum, 0.0);
+    if (h < 3.0) return vec3(0.0, lum, x  );
+    if (h < 4.0) return vec3(0.0, x,   lum);
+    if (h < 5.0) return vec3(x,   0.0, lum);
+                 return vec3(lum, 0.0, x  );
+  }
+  return col;
+}
+
 void main() {
-  // Cylinder normal from cross-section position v_tubeT
-  float sint = clamp(v_tubeT, -1.0, 1.0);
-  float cost = sqrt(max(0.0, 1.0 - sint * sint));
-  vec3 N = vec3(0.0, sint, cost);                   // tube surface normal
-  vec3 L = normalize(vec3(0.3, 0.7, 1.0));          // light: right, up, toward camera
+  float sint  = clamp(v_tubeT, -1.0, 1.0);
+  vec3 N = vec3(0.0, sint, sqrt(max(0.0, 1.0 - sint*sint)));
+  vec3 L = normalize(vec3(0.3, 0.7, 1.0));
   float diffuse = max(0.0, dot(N, L));
   float spec    = pow(max(0.0, N.z), 24.0);
-  // ambient raised so the lit face of the tube stays bright; sheen clamped so >1 doesn't go dark
-  float shade = mix(1.0, 0.55 + diffuse * 0.45 + spec * 0.25, clamp(u_sheen, 0.0, 1.0));
-  fragColor = vec4(clamp(v_color.rgb * shade * v_shadow, 0.0, 1.0), 1.0);
+  float shade   = mix(1.0, 0.55 + diffuse * 0.45 + spec * 0.25, clamp(u_sheen, 0.0, 1.0));
+  vec3 lit = v_color.rgb * shade * v_shadow;
+  // depth fog: sunken/dark lines (v_z ≈ 0) fade to black
+  lit *= (1.0 - u_fog * (1.0 - v_z) * 0.88);
+  // color palette
+  vec3 palCol = applyPalette(lit, u_palette);
+  fragColor = vec4(clamp(mix(lit, palCol, u_paletteAmt), 0.0, 1.0), 1.0);
 }
 `;
 
@@ -183,10 +219,54 @@ void main() {
 }
 `;
 
+// --- Separable Gaussian blur (bloom) ----------------------------------------
+const BLUR_FRAG = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_dir;
+out vec4 fragColor;
+void main() {
+  vec2 o1 = 1.4118 * u_dir; vec2 o2 = 3.2941 * u_dir; vec2 o3 = 5.1765 * u_dir;
+  fragColor = texture(u_tex, v_uv)      * 0.19648
+            + texture(u_tex, v_uv+o1)   * 0.29691
+            + texture(u_tex, v_uv-o1)   * 0.29691
+            + texture(u_tex, v_uv+o2)   * 0.09444
+            + texture(u_tex, v_uv-o2)   * 0.09444
+            + texture(u_tex, v_uv+o3)   * 0.01038
+            + texture(u_tex, v_uv-o3)   * 0.01038;
+}
+`;
+
+// --- Composite: scene + additive bloom ---------------------------------------
+const COMPOSITE_FRAG = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_scene;
+uniform sampler2D u_bloom;
+uniform float u_bloomAmt;
+out vec4 fragColor;
+void main() {
+  vec3 s = texture(u_scene, v_uv).rgb;
+  vec3 b = texture(u_bloom, v_uv).rgb;
+  fragColor = vec4(clamp(s + b * u_bloomAmt * 2.0, 0.0, 1.0), 1.0);
+}
+`;
+
 // --- Temporal smooth globals --------------------------------------------------
 let blendProg, quadVAO;
 let smoothTex = [null, null], smoothFBO = [null, null], smoothIdx = 0;
 let smoothW = -1, smoothH = -1;
+
+// --- Scene FBO + bloom globals -----------------------------------------------
+let sceneFBO = null, sceneTex = null, sceneDepth = null, sceneCW = -1, sceneCH = -1;
+let blurProg, compositeProg;
+let bloomTex = [null, null], bloomFBO = [null, null], bloomW = -1, bloomH = -1;
+
+// --- Column VBO globals ------------------------------------------------------
+let colVAO, colVBO;
+let lastColW = -1, lastColH = -1, lastColStep = -1;
+let colCounts = [], colOffsets = [];
 
 // --- Matrix helpers (column-major, matching WebGL convention) ----------------
 function mat4Mul(a, b) {
@@ -280,6 +360,98 @@ function buildSmoothFBOs(w, h) {
   smoothW = w; smoothH = h;
 }
 
+function buildSceneFBO(w, h) {
+  if (sceneTex)   gl2.deleteTexture(sceneTex);
+  if (sceneDepth) gl2.deleteRenderbuffer(sceneDepth);
+  if (sceneFBO)   gl2.deleteFramebuffer(sceneFBO);
+  sceneTex = gl2.createTexture();
+  gl2.bindTexture(gl2.TEXTURE_2D, sceneTex);
+  gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA8, w, h, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, null);
+  gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR);
+  gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR);
+  gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE);
+  gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE);
+  sceneDepth = gl2.createRenderbuffer();
+  gl2.bindRenderbuffer(gl2.RENDERBUFFER, sceneDepth);
+  gl2.renderbufferStorage(gl2.RENDERBUFFER, gl2.DEPTH_COMPONENT24, w, h);
+  sceneFBO = gl2.createFramebuffer();
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, sceneFBO);
+  gl2.framebufferTexture2D(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, gl2.TEXTURE_2D, sceneTex, 0);
+  gl2.framebufferRenderbuffer(gl2.FRAMEBUFFER, gl2.DEPTH_ATTACHMENT, gl2.RENDERBUFFER, sceneDepth);
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
+  sceneCW = w; sceneCH = h;
+}
+
+function buildBloomFBOs(w, h) {
+  for (let i = 0; i < 2; i++) {
+    if (bloomTex[i]) gl2.deleteTexture(bloomTex[i]);
+    if (bloomFBO[i]) gl2.deleteFramebuffer(bloomFBO[i]);
+    bloomTex[i] = gl2.createTexture();
+    gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[i]);
+    gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA8, w, h, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, null);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE);
+    bloomFBO[i] = gl2.createFramebuffer();
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[i]);
+    gl2.framebufferTexture2D(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, gl2.TEXTURE_2D, bloomTex[i], 0);
+  }
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
+  bloomW = w; bloomH = h;
+}
+
+function buildBlurProg() {
+  const vs = compileShader(gl2.VERTEX_SHADER,   BLEND_VERT);
+  const fs = compileShader(gl2.FRAGMENT_SHADER, BLUR_FRAG);
+  const p  = gl2.createProgram();
+  gl2.attachShader(p, vs); gl2.attachShader(p, fs);
+  gl2.linkProgram(p);
+  if (!gl2.getProgramParameter(p, gl2.LINK_STATUS)) console.error('Blur link:', gl2.getProgramInfoLog(p));
+  return p;
+}
+
+function buildCompositeProg() {
+  const vs = compileShader(gl2.VERTEX_SHADER,   BLEND_VERT);
+  const fs = compileShader(gl2.FRAGMENT_SHADER, COMPOSITE_FRAG);
+  const p  = gl2.createProgram();
+  gl2.attachShader(p, vs); gl2.attachShader(p, fs);
+  gl2.linkProgram(p);
+  if (!gl2.getProgramParameter(p, gl2.LINK_STATUS)) console.error('Composite link:', gl2.getProgramInfoLog(p));
+  return p;
+}
+
+function buildColumnVBO(srcW, srcH, step) {
+  if (srcW === lastColW && srcH === lastColH && step === lastColStep) return;
+  lastColW = srcW; lastColH = srcH; lastColStep = step;
+  const cols = Math.ceil(srcW / step);
+  const rows = Math.ceil(srcH / step);
+  colCounts = []; colOffsets = [];
+  const uvs = [];
+  let offset = 0;
+  for (let col = 0; col < cols; col++) {
+    const nx = (col * step + step * 0.5) / srcW;
+    colOffsets.push(offset);
+    for (let row = 0; row < rows; row++) {
+      const ny = (row * step + step * 0.5) / srcH;
+      uvs.push(nx, ny, -1.0);
+      uvs.push(nx, ny,  1.0);
+    }
+    colCounts.push(rows * 2);
+    offset += rows * 2;
+  }
+  gl2.bindVertexArray(colVAO);
+  gl2.bindBuffer(gl2.ARRAY_BUFFER, colVBO);
+  gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(uvs), gl2.DYNAMIC_DRAW);
+  const aUV   = gl2.getAttribLocation(prog, 'a_uv');
+  gl2.enableVertexAttribArray(aUV);
+  gl2.vertexAttribPointer(aUV, 2, gl2.FLOAT, false, 12, 0);
+  const aTubeT = gl2.getAttribLocation(prog, 'a_tubeT');
+  gl2.enableVertexAttribArray(aTubeT);
+  gl2.vertexAttribPointer(aTubeT, 1, gl2.FLOAT, false, 12, 8);
+  gl2.bindVertexArray(null);
+}
+
 // Rebuild VBO only when grid parameters change
 function buildScanlineVBO(srcW, srcH, step) {
   if (srcW === lastGridW && srcH === lastGridH && step === lastStep) return;
@@ -349,10 +521,14 @@ function setup() {
   gl2 = canvas.getContext('webgl2', { antialias: true, preserveDrawingBuffer: true });
   if (!gl2) { alert('WebGL2 not supported by this browser.'); return; }
 
-  prog    = buildProgram();
-  blendProg = buildBlendProg();
+  prog          = buildProgram();
+  blendProg     = buildBlendProg();
+  blurProg      = buildBlurProg();
+  compositeProg = buildCompositeProg();
   vao     = gl2.createVertexArray();
   lineVBO = gl2.createBuffer();
+  colVAO  = gl2.createVertexArray();
+  colVBO  = gl2.createBuffer();
   buildQuadVAO();
 
   srcTexture = gl2.createTexture();
@@ -394,10 +570,15 @@ function setup() {
   gammaSlider = select("#gammaSlider");
   gammaLabel  = select("#gammaLabel");
 
-  chromaSlider  = select("#chromaSlider");
-  sheenSlider   = select("#sheenSlider");
-  contactSlider = select("#contactSlider");
-  temporalSlider = select("#temporalSlider");
+  chromaSlider     = select("#chromaSlider");
+  sheenSlider      = select("#sheenSlider");
+  contactSlider    = select("#contactSlider");
+  fogSlider        = select("#fogSlider");
+  bloomSlider      = select("#bloomSlider");
+  paletteSelect    = select("#paletteSelect");
+  paletteAmtSlider = select("#paletteAmtSlider");
+  scanModeSelect   = select("#scanModeSelect");
+  temporalSlider   = select("#temporalSlider");
 
   horizAmpSlider = select("#horizAmpSlider");
   vertAmpSlider  = select("#vertAmpSlider");
@@ -509,6 +690,11 @@ function renderLoop() {
   const chromaShift = Number(chromaSlider.value());
   const sheen         = Number(sheenSlider.value());
   const contact       = Number(contactSlider.value());
+  const fog           = Number(fogSlider.value());
+  const bloomAmt      = Number(bloomSlider.value());
+  const paletteIdx    = Number(paletteSelect.value());
+  const paletteAmt    = Number(paletteAmtSlider.value());
+  const scanMode      = scanModeSelect.value(); // 'H', 'V', or 'X'
   const temporal      = Number(temporalSlider.value()); // 0=max smooth, 1=none
 
   // Update labels
@@ -525,6 +711,9 @@ function renderLoop() {
   select("#chromaLabel").html(chromaShift.toFixed(3));
   select("#sheenLabel").html(sheen.toFixed(2));
   select("#contactLabel").html(contact.toFixed(2));
+  select("#fogLabel").html(fog.toFixed(2));
+  select("#bloomLabel").html(bloomAmt.toFixed(2));
+  select("#paletteAmtLabel").html(paletteAmt.toFixed(2));
   select("#temporalLabel").html(temporal.toFixed(2));
   select("#horizAmpLabel").html(horizAmp.toFixed(1));
   select("#vertAmpLabel").html(vertAmp.toFixed(1));
@@ -585,8 +774,11 @@ function renderLoop() {
 
   const mvp = mat4Mul(ortho, m);
 
-  // --- WebGL draw ------------------------------------------------------------
-  gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);  // must unbind FBO before sampling its texture
+  // --- Scene FBO: rebuild if canvas size changed ----------------------------
+  if (CW !== sceneCW || CH !== sceneCH) buildSceneFBO(CW, CH);
+
+  // --- Main draw → sceneFBO ------------------------------------------------
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, sceneFBO);
   gl2.viewport(0, 0, CW, CH);
   gl2.clearColor(0, 0, 0, 1);
   gl2.clear(gl2.COLOR_BUFFER_BIT | gl2.DEPTH_BUFFER_BIT);
@@ -596,23 +788,26 @@ function renderLoop() {
   gl2.useProgram(prog);
 
   const ul = loc => gl2.getUniformLocation(prog, loc);
-  gl2.uniformMatrix4fv(ul('u_mvp'),      false, mvp);
-  gl2.uniform2f(ul('u_srcSize'),         srcW, srcH);
-  gl2.uniform1f(ul('u_depth'),           depth);
-  gl2.uniform2f(ul('u_horizVert'),       horizAmp, vertAmp);
-  gl2.uniform1f(ul('u_gamma'),           gamma);
-  gl2.uniform1f(ul('u_shapeX'),          shapeX);
-  gl2.uniform1f(ul('u_shapeY'),          shapeY);
-  gl2.uniform1f(ul('u_waveAmp'),         waveAmp);
-  gl2.uniform1f(ul('u_waveFreq'),        waveFreq);
-  gl2.uniform1f(ul('u_chromaShift'),     chromaShift);
-  gl2.uniform1f(ul('u_sheen'),           sheen);
-  gl2.uniform1f(ul('u_contactShadow'),   contact);
-  gl2.uniform1f(ul('u_rowStep'),         step / srcH);
+  gl2.uniformMatrix4fv(ul('u_mvp'),          false, mvp);
+  gl2.uniform2f(ul('u_srcSize'),             srcW, srcH);
+  gl2.uniform1f(ul('u_depth'),               depth);
+  gl2.uniform2f(ul('u_horizVert'),           horizAmp, vertAmp);
+  gl2.uniform1f(ul('u_gamma'),               gamma);
+  gl2.uniform1f(ul('u_shapeX'),              shapeX);
+  gl2.uniform1f(ul('u_shapeY'),              shapeY);
+  gl2.uniform1f(ul('u_waveAmp'),             waveAmp);
+  gl2.uniform1f(ul('u_waveFreq'),            waveFreq);
+  gl2.uniform1f(ul('u_chromaShift'),         chromaShift);
+  gl2.uniform1f(ul('u_sheen'),               sheen);
+  gl2.uniform1f(ul('u_contactShadow'),       contact);
+  gl2.uniform1f(ul('u_rowStep'),             step / srcH);
+  gl2.uniform1f(ul('u_fog'),                 fog);
+  gl2.uniform1i(ul('u_palette'),             paletteIdx);
+  gl2.uniform1f(ul('u_paletteAmt'),          paletteAmt);
   // tube fill: sheen=0 -> fills gap (0.48), sheen=1 -> tight line (0.09)
-  const tubeFill = 0.48 - sheen * 0.39;
-  const tubeHalfNDC = (step * scl * sf * vertAmp) / (CH / 2) * tubeFill;
-  gl2.uniform1f(ul('u_tubeWidth'),       tubeHalfNDC);
+  const tubeFill       = 0.48 - Math.min(sheen, 1.0) * 0.39;
+  const tubeHalfNDC    = (step * scl * sf * vertAmp)  / (CH / 2) * tubeFill;
+  const tubeHalfColNDC = (step * scl * sf * horizAmp) / (CW / 2) * tubeFill;
 
   gl2.activeTexture(gl2.TEXTURE0);
   gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
@@ -621,10 +816,58 @@ function renderLoop() {
   gl2.bindTexture(gl2.TEXTURE_2D, smoothTex[smoothIdx]);
   gl2.uniform1i(ul('u_depthTex'), 1);
 
-  gl2.bindVertexArray(vao);
-  for (let i = 0; i < rowCounts.length; i++) {
-    gl2.drawArrays(gl2.TRIANGLE_STRIP, rowOffsets[i], rowCounts[i]);
+  // Horizontal scanlines
+  if (scanMode !== 'V') {
+    gl2.uniform1f(ul('u_tubeAxis'),  0.0);
+    gl2.uniform1f(ul('u_tubeWidth'), tubeHalfNDC);
+    gl2.bindVertexArray(vao);
+    for (let i = 0; i < rowCounts.length; i++)
+      gl2.drawArrays(gl2.TRIANGLE_STRIP, rowOffsets[i], rowCounts[i]);
+    gl2.bindVertexArray(null);
   }
+
+  // Vertical scan columns
+  if (scanMode !== 'H') {
+    buildColumnVBO(srcW, srcH, step);
+    gl2.uniform1f(ul('u_tubeAxis'),  1.0);
+    gl2.uniform1f(ul('u_tubeWidth'), tubeHalfColNDC);
+    gl2.bindVertexArray(colVAO);
+    for (let i = 0; i < colCounts.length; i++)
+      gl2.drawArrays(gl2.TRIANGLE_STRIP, colOffsets[i], colCounts[i]);
+    gl2.bindVertexArray(null);
+  }
+
+  // --- Bloom pass (blur at 1/4 res, composite additively) ------------------
+  const bw = Math.max(1, Math.floor(CW / 4));
+  const bh = Math.max(1, Math.floor(CH / 4));
+  if (bw !== bloomW || bh !== bloomH) buildBloomFBOs(bw, bh);
+
+  gl2.disable(gl2.DEPTH_TEST);
+  gl2.bindVertexArray(quadVAO);
+  gl2.useProgram(blurProg);
+  // H blur: sceneTex → bloomFBO[0]
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[0]);
+  gl2.viewport(0, 0, bw, bh);
+  gl2.activeTexture(gl2.TEXTURE0); gl2.bindTexture(gl2.TEXTURE_2D, sceneTex);
+  gl2.uniform1i(gl2.getUniformLocation(blurProg, 'u_tex'), 0);
+  gl2.uniform2f(gl2.getUniformLocation(blurProg, 'u_dir'), 1.0 / bw, 0.0);
+  gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+  // V blur: bloomTex[0] → bloomFBO[1]
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, bloomFBO[1]);
+  gl2.activeTexture(gl2.TEXTURE0); gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[0]);
+  gl2.uniform2f(gl2.getUniformLocation(blurProg, 'u_dir'), 0.0, 1.0 / bh);
+  gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+
+  // --- Composite scene + bloom → default FBO --------------------------------
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
+  gl2.viewport(0, 0, CW, CH);
+  gl2.useProgram(compositeProg);
+  gl2.activeTexture(gl2.TEXTURE0); gl2.bindTexture(gl2.TEXTURE_2D, sceneTex);
+  gl2.uniform1i(gl2.getUniformLocation(compositeProg, 'u_scene'), 0);
+  gl2.activeTexture(gl2.TEXTURE1); gl2.bindTexture(gl2.TEXTURE_2D, bloomTex[1]);
+  gl2.uniform1i(gl2.getUniformLocation(compositeProg, 'u_bloom'), 1);
+  gl2.uniform1f(gl2.getUniformLocation(compositeProg, 'u_bloomAmt'), bloomAmt);
+  gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
   gl2.bindVertexArray(null);
 }
 

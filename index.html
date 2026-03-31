@@ -131,6 +131,39 @@
       </div>
 
       <div class="control-group">
+        <label for="fogSlider">Depth Fog: <span id="fogLabel">0.00</span></label>
+        <input type="range" id="fogSlider" min="0" max="1" value="0" step="0.01">
+      </div>
+
+      <div class="control-group">
+        <label for="bloomSlider">Bloom: <span id="bloomLabel">0.00</span></label>
+        <input type="range" id="bloomSlider" min="0" max="1" value="0" step="0.01">
+      </div>
+
+      <div class="control-group">
+        <label for="paletteSelect">Color Palette:</label>
+        <select id="paletteSelect">
+          <option value="0">None</option>
+          <option value="1">Phosphor Green</option>
+          <option value="2">Thermal</option>
+          <option value="3">Oscilloscope</option>
+          <option value="4">Sepia</option>
+          <option value="5">Rainbow</option>
+        </select>
+        <label for="paletteAmtSlider"> Amt: <span id="paletteAmtLabel">0.00</span></label>
+        <input type="range" id="paletteAmtSlider" min="0" max="1" value="0" step="0.01">
+      </div>
+
+      <div class="control-group">
+        <label for="scanModeSelect">Scan Mode:</label>
+        <select id="scanModeSelect">
+          <option value="H">Horizontal</option>
+          <option value="V">Vertical</option>
+          <option value="X">Both (Grid)</option>
+        </select>
+      </div>
+
+      <div class="control-group">
         <label for="temporalSlider">Temporal Smooth: <span id="temporalLabel">1.00</span></label>
         <input type="range" id="temporalSlider" min="0.01" max="1" value="1" step="0.01">
       </div>
