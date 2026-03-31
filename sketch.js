@@ -558,6 +558,7 @@ function renderLoop() {
   const mvp = mat4Mul(ortho, m);
 
   // --- WebGL draw ------------------------------------------------------------
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);  // must unbind FBO before sampling its texture
   gl2.viewport(0, 0, CW, CH);
   gl2.clearColor(0, 0, 0, 1);
   gl2.clear(gl2.COLOR_BUFFER_BIT | gl2.DEPTH_BUFFER_BIT);
