@@ -127,26 +127,32 @@ void main() {
   float waveY = scaleWaveY * sin(nx * PI * 2.0 * u_waveFreq);
 
   // --- Sphere wrap ---------------------------------------------------------
-  // shapeX (0-1): folds left/right edges backward (horizontal cylinder)
-  // shapeY (0-1): folds top/bottom edges backward (vertical cylinder)
-  // At shapeX=shapeY=1 the raster forms a closed sphere.
+  // lon = longitude (-π..+π across width  when shapeX=1)
+  // lat = latitude  (-π/2..+π/2 top→bottom when shapeY=1)
+  // The cos(lat) term in sphX is the key sphere property:
+  //   circles of latitude shrink toward the poles, so lines pinch together
+  //   at the top/bottom exactly like a real globe. Two independent cylinders
+  //   have no such coupling and cannot form a sphere.
   float W  = sz.x * u_horizVert.x;
   float H  = sz.y * u_horizVert.y;
-  float Rx = W / (2.0 * PI);  // radius preserving arc length
-  float Ry = H / (2.0 * PI);
+  float Rx = W / (PI * 2.0);   // equatorial radius  (arc = W when wrapH=1)
+  float Ry = H / PI;            // meridional radius  (arc = H when wrapV=1)
 
-  float phiX   = (nx - 0.5) * 2.0 * PI;          // -pi..+pi across width
-  float pxWrap = 0.5 * W + Rx * sin(phiX);
-  float fzX    = Rx * (1.0 - cos(phiX));          // 0 at centre, 2Rx at edges
+  float lon = (nx - 0.5) * PI * 2.0 * u_shapeX;   // -π..+π
+  float lat = (ny - 0.5) * PI       * u_shapeY;    // -π/2..+π/2
 
-  float phiY   = (ny - 0.5) * 2.0 * PI;          // -pi..+pi across height
-  float pyWrap = 0.5 * H + Ry * sin(phiY);
-  float fzY    = Ry * (1.0 - cos(phiY));
+  // Sphere surface positions (relative to raster centre)
+  float sphX = Rx * cos(lat) * sin(lon);   // ← cos(lat) is what makes it a sphere
+  float sphY = Ry * sin(lat);
 
-  float px = mix(nx * W, pxWrap, u_shapeX) + waveX;
-  float py = mix(ny * H, pyWrap, u_shapeY) + waveY;
-  // subtract fold so edges recede away from viewer
-  float foldZ = mix(0.0, fzX, u_shapeX) + mix(0.0, fzY, u_shapeY);
+  float px = W * 0.5 + mix((nx - 0.5) * W, sphX, u_shapeX) + waveX;
+  float py = H * 0.5 + mix((ny - 0.5) * H, sphY, u_shapeY) + waveY;
+
+  // Fold-back z: push wrapped edges away from the viewer.
+  // foldZH is modulated by cos(lat) so the equatorial fold reduces near the poles.
+  float foldZH = Rx * cos(lat) * (1.0 - cos(lon)) * u_shapeX;
+  float foldZV = Ry * (1.0 - cos(lat))             * u_shapeY;
+  float foldZ  = foldZH + foldZV;
 
   float depth = u_depth;
   float z = (gammaBright * 2.0 - 1.0) * abs(depth);
