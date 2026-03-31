@@ -609,8 +609,9 @@ function renderLoop() {
   gl2.uniform1f(ul('u_sheen'),           sheen);
   gl2.uniform1f(ul('u_contactShadow'),   contact);
   gl2.uniform1f(ul('u_rowStep'),         step / srcH);
-  // tube half-height in NDC: fills ~96% of the gap between scanlines
-  const tubeHalfNDC = (step * scl * sf * vertAmp) / (CH / 2) * 0.48;
+  // tube fill: sheen=0 -> fills gap (0.48), sheen=1 -> tight line (0.09)
+  const tubeFill = 0.48 - sheen * 0.39;
+  const tubeHalfNDC = (step * scl * sf * vertAmp) / (CH / 2) * tubeFill;
   gl2.uniform1f(ul('u_tubeWidth'),       tubeHalfNDC);
 
   gl2.activeTexture(gl2.TEXTURE0);
