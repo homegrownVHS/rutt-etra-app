@@ -176,8 +176,10 @@ void main() {
   z -= foldZ;
 
   vec4 clipPos = u_mvp * vec4(px, py, z, 1.0);
-  clipPos.x += a_tubeT * u_tubeWidth *        u_tubeAxis;
-  clipPos.y += a_tubeT * u_tubeWidth * (1.0 - u_tubeAxis);
+  // Multiply by clipPos.w so the NDC offset is constant after perspective divide.
+  // With ortho clip.w=1 (no change); with perspective clip.w=D-z, compensating for foreshortening.
+  clipPos.x += a_tubeT * u_tubeWidth * clipPos.w *        u_tubeAxis;
+  clipPos.y += a_tubeT * u_tubeWidth * clipPos.w * (1.0 - u_tubeAxis);
   v_z = gammaBright;
   gl_Position = clipPos;
 }
