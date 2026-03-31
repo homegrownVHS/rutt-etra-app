@@ -249,6 +249,14 @@
         <label>Upload Video</label>
         <input type="file" id="vidInput" accept="video/*">
       </div>
+      <div class="control-group" id="videoControls" style="display:none">
+        <button id="vidPlayPauseBtn">⏸</button>
+        <label><input type="checkbox" id="vidLoopChk" checked> Loop</label>
+        <span id="vidTimeLabel" style="font-size:0.85em;min-width:7ch">0:00 / 0:00</span>
+      </div>
+      <div class="control-group" id="videoScrubGroup" style="display:none">
+        <input type="range" id="vidScrubber" min="0" max="1000" value="0" step="1" style="width:100%">
+      </div>
       <div class="control-group">
         <button id="downloadBtn">Download Image</button>
       </div>

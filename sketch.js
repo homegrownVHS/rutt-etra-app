@@ -645,6 +645,31 @@ function setup() {
   downloadBtn = select("#downloadBtn");
   downloadBtn.mousePressed(saveImage);
 
+  vidPlayPauseBtn = select("#vidPlayPauseBtn");
+  vidPlayPauseBtn.mousePressed(() => {
+    if (!uploadedMedia || uploadedType !== 'video') return;
+    const v = uploadedMedia.elt;
+    if (v.paused) { v.play(); vidPlayPauseBtn.html('\u23F8'); }
+    else          { v.pause(); vidPlayPauseBtn.html('\u25B6'); }
+  });
+  vidLoopChk = select("#vidLoopChk");
+  vidLoopChk.changed(() => {
+    if (uploadedMedia && uploadedType === 'video')
+      uploadedMedia.elt.loop = vidLoopChk.elt.checked;
+  });
+  vidScrubber = select("#vidScrubber");
+  vidScrubber.elt.addEventListener('mousedown', () => { vidScrubbing = true; });
+  vidScrubber.elt.addEventListener('touchstart', () => { vidScrubbing = true; }, { passive: true });
+  vidScrubber.elt.addEventListener('input', () => {
+    if (!uploadedMedia || uploadedType !== 'video') return;
+    const v = uploadedMedia.elt;
+    const t = (Number(vidScrubber.value()) / 1000) * v.duration;
+    if (isFinite(t)) v.currentTime = t;
+  });
+  window.addEventListener('mouseup',  () => { vidScrubbing = false; });
+  window.addEventListener('touchend', () => { vidScrubbing = false; });
+  vidTimeLabel = select("#vidTimeLabel");
+
   currentFrameForExportInput = select("#currentFrameForExportInput");
   totalFramesForExportInput  = select("#totalFramesForExportInput");
   startExportBtn = select("#startExportBtn");
@@ -744,7 +769,26 @@ function setup() {
 // p5 draw() is intentionally empty -- rendering happens in renderLoop()
 function draw() {}
 
-// --- GPU render loop ---------------------------------------------------------
+// --- Video scrub state ------------------------------------------------------
+let vidPlayPauseBtn, vidLoopChk, vidScrubber, vidTimeLabel;
+let vidScrubbing = false;
+
+function fmtTime(s) {
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
+function showVideoControls(vid) {
+  document.getElementById('videoControls').style.display = '';
+  document.getElementById('videoScrubGroup').style.display = '';
+  vidPlayPauseBtn.html(vid.elt.paused ? '\u25B6' : '\u23F8');
+  vidLoopChk.elt.checked = vid.elt.loop;
+}
+
+function hideVideoControls() {
+  document.getElementById('videoControls').style.display = 'none';
+  document.getElementById('videoScrubGroup').style.display = 'none';
+}
 function renderLoop() {
   requestAnimationFrame(renderLoop);
 
@@ -795,6 +839,17 @@ function renderLoop() {
   const scanMode      = scanModeSelect.value(); // 'H', 'V', or 'X'
   const temporal      = Number(temporalSlider.value());
   const depthSmooth   = Number(depthSmoothSlider.value()); // 0-20 pixel radius
+
+  // Update video scrubber
+  if (uploadedType === 'video' && uploadedMedia) {
+    const v = uploadedMedia.elt;
+    if (!vidScrubbing && isFinite(v.duration) && v.duration > 0) {
+      vidScrubber.elt.value = Math.round((v.currentTime / v.duration) * 1000);
+    }
+    if (isFinite(v.duration))
+      vidTimeLabel.html(fmtTime(v.currentTime) + ' / ' + fmtTime(v.duration));
+    vidPlayPauseBtn.html(v.paused ? '\u25B6' : '\u23F8');
+  }
 
   // Update labels
   select("#depthLabel").html(depth.toFixed(0));
@@ -1105,6 +1160,7 @@ function handleVideoUpload() {
     vid.elt.onloadedmetadata = () => {
       vid.size(640, 480); vid.hide(); vid.loop(); vid.volume(0);
       uploadedMedia = vid; uploadedType = 'video'; currentSourceReady = true;
+      showVideoControls(vid);
     };
     vid.elt.onerror = e => { console.error('Video error:', e); currentSourceReady = false; uploadedMedia = null; };
     vid.elt.load();
@@ -1129,6 +1185,7 @@ function _loadDroppedVideo(url) {
   vid.elt.onloadedmetadata = () => {
     vid.size(640, 480); vid.hide(); vid.loop(); vid.volume(0);
     uploadedMedia = vid; uploadedType = 'video'; currentSourceReady = true;
+    showVideoControls(vid);
   };
   vid.elt.onerror = e => { console.error('Drop video error:', e); currentSourceReady = false; uploadedMedia = null; };
   vid.elt.load();
