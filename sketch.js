@@ -631,6 +631,51 @@ function setup() {
     else if (file.type.startsWith('video/')) _loadDroppedVideo(url);
   });
 
+  // Left-drag  → tilt X/Y   |   Right-drag → pan (offset X/Y)
+  {
+    let dragging = false, dragButton = -1, lastX = 0, lastY = 0;
+
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    canvas.addEventListener('mousedown', e => {
+      if (e.button !== 0 && e.button !== 2) return;
+      dragging    = true;
+      dragButton  = e.button;
+      lastX       = e.clientX;
+      lastY       = e.clientY;
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+
+      if (dragButton === 0) {
+        // Left-drag: tilt.  1 px cursor = 0.5° tilt.
+        const txEl = document.getElementById('tiltXSlider');
+        const tyEl = document.getElementById('tiltYSlider');
+        txEl.value = Math.max(-180, Math.min(180, Number(txEl.value) + dy * 0.5));
+        tyEl.value = Math.max(-180, Math.min(180, Number(tyEl.value) + dx * 0.5));
+        // Mirror back into p5 select wrapper so renderLoop reads it correctly
+        tiltXSlider.elt.value = txEl.value;
+        tiltYSlider.elt.value = tyEl.value;
+      } else if (dragButton === 2) {
+        // Right-drag: pan.  1 px cursor ≈ 1 unit offset.
+        const oxEl = document.getElementById('offsetXSlider');
+        const oyEl = document.getElementById('offsetYSlider');
+        oxEl.value = Math.max(-300, Math.min(300, Number(oxEl.value) + dx));
+        oyEl.value = Math.max(-300, Math.min(300, Number(oyEl.value) + dy));
+        offsetXSlider.elt.value = oxEl.value;
+        offsetYSlider.elt.value = oyEl.value;
+      }
+    });
+
+    window.addEventListener('mouseup', () => { dragging = false; });
+  }
+
   navigator.mediaDevices.enumerateDevices().then(devices => {
     const videoDevices = devices.filter(d => d.kind === 'videoinput');
     videoDevices.forEach((device, i) => {
