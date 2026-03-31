@@ -19,7 +19,7 @@ let offsetXSlider, offsetYSlider;
 let lfoOffsetX, lfoOffsetY;
 
 // --- FX globals --------------------------------------------------------------
-let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect, temporalSlider;
+let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect, temporalSlider, depthSmoothSlider;
 
 // Uniform location caches – populated on first use, valid for program lifetime
 let progUniCache = {}, blurUniCache = {}, compUniCache = {};
@@ -290,6 +290,10 @@ let blurProg, compositeProg;
 let bloomTex = [[null,null],[null,null]], bloomFBO = [[null,null],[null,null]];
 let bloomDims = [[-1,-1],[-1,-1]]; // [[w,h], [w,h]] per level
 
+// Depth blur (spatial smoothing of displacement texture)
+let depthBlurTex = [null, null], depthBlurFBO = [null, null];
+let depthBlurW = -1, depthBlurH = -1;
+
 // --- Column VBO globals ------------------------------------------------------
 let colVAO, colVBO;
 let lastColW = -1, lastColH = -1, lastColStep = -1;
@@ -407,6 +411,25 @@ function buildSceneFBO(w, h) {
   gl2.framebufferRenderbuffer(gl2.FRAMEBUFFER, gl2.DEPTH_ATTACHMENT, gl2.RENDERBUFFER, sceneDepth);
   gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
   sceneCW = w; sceneCH = h;
+}
+
+function buildDepthBlurFBOs(w, h) {
+  for (let i = 0; i < 2; i++) {
+    if (depthBlurTex[i]) gl2.deleteTexture(depthBlurTex[i]);
+    if (depthBlurFBO[i]) gl2.deleteFramebuffer(depthBlurFBO[i]);
+    depthBlurTex[i] = gl2.createTexture();
+    gl2.bindTexture(gl2.TEXTURE_2D, depthBlurTex[i]);
+    gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA8, w, h, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, null);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE);
+    depthBlurFBO[i] = gl2.createFramebuffer();
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, depthBlurFBO[i]);
+    gl2.framebufferTexture2D(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, gl2.TEXTURE_2D, depthBlurTex[i], 0);
+  }
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
+  depthBlurW = w; depthBlurH = h;
 }
 
 function buildBloomLevel(lv, w, h) {
@@ -607,6 +630,7 @@ function setup() {
   paletteAmtSlider = select("#paletteAmtSlider");
   scanModeSelect   = select("#scanModeSelect");
   temporalSlider   = select("#temporalSlider");
+  depthSmoothSlider = select("#depthSmoothSlider");
 
   horizAmpSlider = select("#horizAmpSlider");
   vertAmpSlider  = select("#vertAmpSlider");
@@ -769,7 +793,8 @@ function renderLoop() {
   const paletteIdx    = Number(paletteSelect.value());
   const paletteAmt    = Number(paletteAmtSlider.value());
   const scanMode      = scanModeSelect.value(); // 'H', 'V', or 'X'
-  const temporal      = Number(temporalSlider.value()); // 0=max smooth, 1=none
+  const temporal      = Number(temporalSlider.value());
+  const depthSmooth   = Number(depthSmoothSlider.value()); // 0-20 pixel radius
 
   // Update labels
   select("#depthLabel").html(depth.toFixed(0));
@@ -789,6 +814,7 @@ function renderLoop() {
   select("#bloomLabel").html(bloomAmt.toFixed(2));
   select("#paletteAmtLabel").html(paletteAmt.toFixed(2));
   select("#temporalLabel").html(temporal.toFixed(2));
+  select("#depthSmoothLabel").html(depthSmooth.toFixed(0));
   select("#horizAmpLabel").html(horizAmp.toFixed(1));
   select("#vertAmpLabel").html(vertAmp.toFixed(1));
   select("#offsetXLabel").html(offsetX.toFixed(0));
@@ -839,6 +865,32 @@ function renderLoop() {
   gl2.bindVertexArray(quadVAO);
   gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
   smoothIdx = sWrite;
+
+  // --- Depth blur pass (spatial smoothing of displacement texture) ----------
+  let depthTexForDisplace = smoothTex[smoothIdx];
+  if (depthSmooth > 0) {
+    if (srcW !== depthBlurW || srcH !== depthBlurH) buildDepthBlurFBOs(srcW, srcH);
+    gl2.bindVertexArray(quadVAO);
+    gl2.useProgram(blurProg);
+    const bul = name => name in blurUniCache
+      ? blurUniCache[name]
+      : (blurUniCache[name] = gl2.getUniformLocation(blurProg, name));
+    const sr = depthSmooth / srcW;  // step radius in UV space
+    gl2.viewport(0, 0, srcW, srcH);
+    gl2.activeTexture(gl2.TEXTURE0);
+    gl2.uniform1i(bul('u_tex'), 0);
+    // H pass: smoothTex → depthBlurFBO[0]
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, depthBlurFBO[0]);
+    gl2.bindTexture(gl2.TEXTURE_2D, smoothTex[smoothIdx]);
+    gl2.uniform2f(bul('u_dir'), sr, 0.0);
+    gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+    // V pass: depthBlurTex[0] → depthBlurFBO[1]
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, depthBlurFBO[1]);
+    gl2.bindTexture(gl2.TEXTURE_2D, depthBlurTex[0]);
+    gl2.uniform2f(bul('u_dir'), 0.0, sr * srcW / srcH);
+    gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+    depthTexForDisplace = depthBlurTex[1];
+  }
 
   // Build MVP matrix (mirrors original p5 WEBGL transforms)
   //   rotateX(rotX+tiltX) -> rotateY(rotY+tiltY) -> scale(scl*scaleFactor)
@@ -913,7 +965,7 @@ function renderLoop() {
   gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
   gl2.uniform1i(ul('u_tex'), 0);
   gl2.activeTexture(gl2.TEXTURE1);
-  gl2.bindTexture(gl2.TEXTURE_2D, smoothTex[smoothIdx]);
+  gl2.bindTexture(gl2.TEXTURE_2D, depthTexForDisplace);
   gl2.uniform1i(ul('u_depthTex'), 1);
 
   // Horizontal scanlines
