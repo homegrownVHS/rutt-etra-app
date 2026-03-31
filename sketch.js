@@ -18,6 +18,9 @@ let lfoHorizAmp, lfoVertAmp;
 let offsetXSlider, offsetYSlider;
 let lfoOffsetX, lfoOffsetY;
 
+// --- FX globals --------------------------------------------------------------
+let chromaSlider, sheenSlider;
+
 let currentSourceReady = false;
 let selectedDeviceId = null;
 let controlsHovering = false;
@@ -53,10 +56,14 @@ uniform float u_shapeX;
 uniform float u_shapeY;
 uniform float u_waveAmp;
 uniform float u_waveFreq;
+uniform float u_chromaShift;
+uniform float u_sheen;
 
 out vec4 v_color;
+out float v_brightness;
 
 uniform sampler2D u_tex;
+uniform sampler2D u_depthTex;
 
 const float PI = 3.14159265358979;
 
@@ -71,18 +78,25 @@ float parabolicBend(float n, float s) {
 
 void main() {
   vec2 sz = u_srcSize;
-  vec4 texel = texture(u_tex, a_uv);
-  float r = texel.r;
-  float g = texel.g;
-  float b = texel.b;
+
+  // Chromatic aberration: split R and B channels laterally
+  float cs = u_chromaShift;
+  float r = texture(u_tex, vec2(clamp(a_uv.x - cs, 0.0, 1.0), a_uv.y)).r;
+  vec4 texC = texture(u_tex, a_uv);
+  float g = texC.g;
+  float b = texture(u_tex, vec2(clamp(a_uv.x + cs, 0.0, 1.0), a_uv.y)).b;
 
   float bright = (r + g + b) / 3.0;
-  float gammaBright = applyGamma(bright, u_gamma);
+  // Sample smoothed texture for Z to reduce temporal jitter
+  vec3 ds = texture(u_depthTex, a_uv).rgb;
+  float brightDepth = (ds.r + ds.g + ds.b) / 3.0;
+  float gammaBright = applyGamma(brightDepth, u_gamma);
 
   v_color = vec4(applyGamma(r, u_gamma),
                  applyGamma(g, u_gamma),
                  applyGamma(b, u_gamma),
                  1.0);
+  v_brightness = gammaBright;
 
   float nx = a_uv.x;
   float ny = a_uv.y;
@@ -112,12 +126,48 @@ void main() {
 // --- Fragment Shader ----------------------------------------------------------
 const FRAG_SRC = `#version 300 es
 precision mediump float;
-in vec4 v_color;
+in vec4  v_color;
+in float v_brightness;
+uniform float u_sheen;
 out vec4 fragColor;
 void main() {
-  fragColor = v_color;
+  // Tube shading via screen-space derivatives:
+  // high slope = side of the ridge (dark), flat peak = top of tube (lit + specular)
+  float slope = length(vec2(dFdx(v_brightness), dFdy(v_brightness)));
+  float slopeMag  = clamp(slope * 12.0, 0.0, 1.0);
+  // darken sides proportional to sheen amount
+  float sideDark  = 1.0 - u_sheen * slopeMag * 0.85;
+  // specular highlight at peaks (low slope, high Z)
+  float spec      = u_sheen * pow(max(0.0, 1.0 - slopeMag), 3.0) * v_brightness;
+  fragColor = vec4(clamp(v_color.rgb * sideDark + spec, 0.0, 1.0), 1.0);
 }
 `;
+
+// --- Temporal blend shader (full-screen quad EMA pass) -----------------------
+const BLEND_VERT = `#version 300 es
+layout(location=0) in vec2 a_pos;
+out vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}
+`;
+const BLEND_FRAG = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_cur;
+uniform sampler2D u_prev;
+uniform float u_alpha;
+out vec4 fragColor;
+void main() {
+  fragColor = mix(texture(u_prev, v_uv), texture(u_cur, v_uv), u_alpha);
+}
+`;
+
+// --- Temporal smooth globals --------------------------------------------------
+let blendProg, quadVAO;
+let smoothTex = [null, null], smoothFBO = [null, null], smoothIdx = 0;
+let smoothW = -1, smoothH = -1;
 
 // --- Matrix helpers (column-major, matching WebGL convention) ----------------
 function mat4Mul(a, b) {
@@ -165,6 +215,50 @@ function buildProgram() {
   if (!gl2.getProgramParameter(p, gl2.LINK_STATUS))
     console.error('Link error:', gl2.getProgramInfoLog(p));
   return p;
+}
+
+function buildBlendProg() {
+  const vs = compileShader(gl2.VERTEX_SHADER,   BLEND_VERT);
+  const fs = compileShader(gl2.FRAGMENT_SHADER, BLEND_FRAG);
+  const p  = gl2.createProgram();
+  gl2.attachShader(p, vs);
+  gl2.attachShader(p, fs);
+  gl2.linkProgram(p);
+  if (!gl2.getProgramParameter(p, gl2.LINK_STATUS))
+    console.error('Blend link error:', gl2.getProgramInfoLog(p));
+  return p;
+}
+
+function buildQuadVAO() {
+  const verts = new Float32Array([-1,-1, 1,-1, -1,1, 1,1]);
+  quadVAO = gl2.createVertexArray();
+  gl2.bindVertexArray(quadVAO);
+  const buf = gl2.createBuffer();
+  gl2.bindBuffer(gl2.ARRAY_BUFFER, buf);
+  gl2.bufferData(gl2.ARRAY_BUFFER, verts, gl2.STATIC_DRAW);
+  gl2.enableVertexAttribArray(0);
+  gl2.vertexAttribPointer(0, 2, gl2.FLOAT, false, 0, 0);
+  gl2.bindVertexArray(null);
+}
+
+function buildSmoothFBOs(w, h) {
+  for (let i = 0; i < 2; i++) {
+    if (smoothTex[i]) gl2.deleteTexture(smoothTex[i]);
+    if (smoothFBO[i]) gl2.deleteFramebuffer(smoothFBO[i]);
+    smoothTex[i] = gl2.createTexture();
+    gl2.bindTexture(gl2.TEXTURE_2D, smoothTex[i]);
+    gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA8, w, h, 0, gl2.RGBA, gl2.UNSIGNED_BYTE, null);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MIN_FILTER, gl2.LINEAR);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_MAG_FILTER, gl2.LINEAR);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_S, gl2.CLAMP_TO_EDGE);
+    gl2.texParameteri(gl2.TEXTURE_2D, gl2.TEXTURE_WRAP_T, gl2.CLAMP_TO_EDGE);
+    smoothFBO[i] = gl2.createFramebuffer();
+    gl2.bindFramebuffer(gl2.FRAMEBUFFER, smoothFBO[i]);
+    gl2.framebufferTexture2D(gl2.FRAMEBUFFER, gl2.COLOR_ATTACHMENT0, gl2.TEXTURE_2D, smoothTex[i], 0);
+  }
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, null);
+  gl2.bindTexture(gl2.TEXTURE_2D, null);
+  smoothW = w; smoothH = h;
 }
 
 // Rebuild VBO only when grid parameters change
@@ -231,8 +325,10 @@ function setup() {
   if (!gl2) { alert('WebGL2 not supported by this browser.'); return; }
 
   prog    = buildProgram();
+  blendProg = buildBlendProg();
   vao     = gl2.createVertexArray();
   lineVBO = gl2.createBuffer();
+  buildQuadVAO();
 
   srcTexture = gl2.createTexture();
   gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
@@ -272,6 +368,10 @@ function setup() {
 
   gammaSlider = select("#gammaSlider");
   gammaLabel  = select("#gammaLabel");
+
+  chromaSlider = select("#chromaSlider");
+  sheenSlider  = select("#sheenSlider");
+  temporalSlider = select("#temporalSlider");
 
   horizAmpSlider = select("#horizAmpSlider");
   vertAmpSlider  = select("#vertAmpSlider");
@@ -380,6 +480,9 @@ function renderLoop() {
   const offsetY  = Number(offsetYSlider.value()) + (lfoOffsetY.checked() ? lfo * 100 * lfoAmp : 0);
 
   const gamma = Math.max(0.01, Number(gammaSlider.value()));
+  const chromaShift = Number(chromaSlider.value());
+  const sheen      = Number(sheenSlider.value());
+  const temporal   = Number(temporalSlider.value()); // 0=max smooth, 1=none
 
   // Update labels
   select("#depthLabel").html(depth.toFixed(0));
@@ -392,6 +495,9 @@ function renderLoop() {
   select("#waveAmpLabel").html(waveAmp.toFixed(1));
   select("#waveFreqLabel").html(waveFreq.toFixed(1));
   select("#gammaLabel").html(gamma.toFixed(1));
+  select("#chromaLabel").html(chromaShift.toFixed(3));
+  select("#sheenLabel").html(sheen.toFixed(2));
+  select("#temporalLabel").html(temporal.toFixed(2));
   select("#horizAmpLabel").html(horizAmp.toFixed(1));
   select("#vertAmpLabel").html(vertAmp.toFixed(1));
   select("#offsetXLabel").html(offsetX.toFixed(0));
@@ -405,6 +511,24 @@ function renderLoop() {
 
   buildScanlineVBO(srcW, srcH, step);
   updateTexture(src);
+
+  // --- Temporal smooth pass -------------------------------------------------
+  // Build/rebuild smooth FBOs if source dimensions changed
+  if (srcW !== smoothW || srcH !== smoothH) buildSmoothFBOs(srcW, srcH);
+
+  const sWrite = smoothIdx ^ 1, sRead = smoothIdx;
+  gl2.bindFramebuffer(gl2.FRAMEBUFFER, smoothFBO[sWrite]);
+  gl2.viewport(0, 0, srcW, srcH);
+  gl2.disable(gl2.DEPTH_TEST);
+  gl2.useProgram(blendProg);
+  gl2.activeTexture(gl2.TEXTURE0); gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
+  gl2.uniform1i(gl2.getUniformLocation(blendProg, 'u_cur'),  0);
+  gl2.activeTexture(gl2.TEXTURE1); gl2.bindTexture(gl2.TEXTURE_2D, smoothTex[sRead]);
+  gl2.uniform1i(gl2.getUniformLocation(blendProg, 'u_prev'), 1);
+  gl2.uniform1f(gl2.getUniformLocation(blendProg, 'u_alpha'), temporal);
+  gl2.bindVertexArray(quadVAO);
+  gl2.drawArrays(gl2.TRIANGLE_STRIP, 0, 4);
+  smoothIdx = sWrite;
 
   // Build MVP matrix (mirrors original p5 WEBGL transforms)
   //   rotateX(rotX+tiltX) -> rotateY(rotY+tiltY) -> scale(scl*scaleFactor)
@@ -452,10 +576,15 @@ function renderLoop() {
   gl2.uniform1f(ul('u_shapeY'),          shapeY);
   gl2.uniform1f(ul('u_waveAmp'),         waveAmp);
   gl2.uniform1f(ul('u_waveFreq'),        waveFreq);
+  gl2.uniform1f(ul('u_chromaShift'),     chromaShift);
+  gl2.uniform1f(ul('u_sheen'),           sheen);
 
   gl2.activeTexture(gl2.TEXTURE0);
   gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
   gl2.uniform1i(ul('u_tex'), 0);
+  gl2.activeTexture(gl2.TEXTURE1);
+  gl2.bindTexture(gl2.TEXTURE_2D, smoothTex[smoothIdx]);
+  gl2.uniform1i(ul('u_depthTex'), 1);
 
   gl2.bindVertexArray(vao);
   for (let i = 0; i < rowCounts.length; i++) {
