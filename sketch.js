@@ -57,10 +57,12 @@ uniform float u_shapeY;
 uniform float u_waveAmp;
 uniform float u_waveFreq;
 uniform float u_chromaShift;
-uniform float u_sheen;
+uniform float u_tubeWidth;
+
+in float a_tubeT;
 
 out vec4 v_color;
-out float v_brightness;
+out float v_tubeT;
 
 uniform sampler2D u_tex;
 uniform sampler2D u_depthTex;
@@ -96,7 +98,7 @@ void main() {
                  applyGamma(g, u_gamma),
                  applyGamma(b, u_gamma),
                  1.0);
-  v_brightness = gammaBright;
+  v_tubeT = a_tubeT;
 
   float nx = a_uv.x;
   float ny = a_uv.y;
@@ -119,7 +121,9 @@ void main() {
   float z = (gammaBright * 2.0 - 1.0) * abs(depth);
   if (depth < 0.0) z *= -1.0;
 
-  gl_Position = u_mvp * vec4(px, py, z, 1.0);
+  vec4 clipPos = u_mvp * vec4(px, py, z, 1.0);
+  clipPos.y += a_tubeT * u_tubeWidth;
+  gl_Position = clipPos;
 }
 `;
 
@@ -127,19 +131,20 @@ void main() {
 const FRAG_SRC = `#version 300 es
 precision mediump float;
 in vec4  v_color;
-in float v_brightness;
+in float v_tubeT;    // -1 = tube bottom edge, 0 = facing camera, +1 = tube top edge
 uniform float u_sheen;
 out vec4 fragColor;
 void main() {
-  // Tube shading via screen-space derivatives:
-  // high slope = side of the ridge (dark), flat peak = top of tube (lit + specular)
-  float slope = length(vec2(dFdx(v_brightness), dFdy(v_brightness)));
-  float slopeMag  = clamp(slope * 12.0, 0.0, 1.0);
-  // darken sides proportional to sheen amount
-  float sideDark  = 1.0 - u_sheen * slopeMag * 0.85;
-  // specular highlight at peaks (low slope, high Z)
-  float spec      = u_sheen * pow(max(0.0, 1.0 - slopeMag), 3.0) * v_brightness;
-  fragColor = vec4(clamp(v_color.rgb * sideDark + spec, 0.0, 1.0), 1.0);
+  // Cylinder normal from cross-section position v_tubeT
+  float sint = clamp(v_tubeT, -1.0, 1.0);
+  float cost = sqrt(max(0.0, 1.0 - sint * sint));
+  vec3 N = vec3(0.0, sint, cost);                   // tube surface normal
+  vec3 L = normalize(vec3(0.3, 0.7, 1.0));          // light: right, up, toward camera
+  float diffuse = max(0.0, dot(N, L));
+  float spec    = pow(max(0.0, N.z), 8.0);           // specular at camera-facing peak
+  // ambient + diffuse + specular; sheen=0 -> flat colour, sheen=1 -> full tube shading
+  float shade = mix(1.0, 0.15 + diffuse * 0.65 + spec * 0.35, u_sheen);
+  fragColor = vec4(clamp(v_color.rgb * shade, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -277,10 +282,12 @@ function buildScanlineVBO(srcW, srcH, step) {
     const ny = (row * step + step * 0.5) / srcH;
     rowOffsets.push(offset);
     for (let col = 0; col < cols; col++) {
-      uvs.push((col * step + step * 0.5) / srcW, ny);
+      const nx = (col * step + step * 0.5) / srcW;
+      uvs.push(nx, ny, -1.0);  // tube top (NDC-down)
+      uvs.push(nx, ny,  1.0);  // tube bottom (NDC-up)
     }
-    rowCounts.push(cols);
-    offset += cols;
+    rowCounts.push(cols * 2);
+    offset += cols * 2;
   }
 
   gl2.bindVertexArray(vao);
@@ -288,7 +295,10 @@ function buildScanlineVBO(srcW, srcH, step) {
   gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(uvs), gl2.DYNAMIC_DRAW);
   const aUV = gl2.getAttribLocation(prog, 'a_uv');
   gl2.enableVertexAttribArray(aUV);
-  gl2.vertexAttribPointer(aUV, 2, gl2.FLOAT, false, 0, 0);
+  gl2.vertexAttribPointer(aUV, 2, gl2.FLOAT, false, 12, 0);
+  const aTubeT = gl2.getAttribLocation(prog, 'a_tubeT');
+  gl2.enableVertexAttribArray(aTubeT);
+  gl2.vertexAttribPointer(aTubeT, 1, gl2.FLOAT, false, 12, 8);
   gl2.bindVertexArray(null);
 }
 
@@ -579,6 +589,9 @@ function renderLoop() {
   gl2.uniform1f(ul('u_waveFreq'),        waveFreq);
   gl2.uniform1f(ul('u_chromaShift'),     chromaShift);
   gl2.uniform1f(ul('u_sheen'),           sheen);
+  // tube half-height in NDC: fills ~96% of the gap between scanlines
+  const tubeHalfNDC = (step * scl * sf * vertAmp) / (CH / 2) * 0.48;
+  gl2.uniform1f(ul('u_tubeWidth'),       tubeHalfNDC);
 
   gl2.activeTexture(gl2.TEXTURE0);
   gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
@@ -589,7 +602,7 @@ function renderLoop() {
 
   gl2.bindVertexArray(vao);
   for (let i = 0; i < rowCounts.length; i++) {
-    gl2.drawArrays(gl2.LINE_STRIP, rowOffsets[i], rowCounts[i]);
+    gl2.drawArrays(gl2.TRIANGLE_STRIP, rowOffsets[i], rowCounts[i]);
   }
   gl2.bindVertexArray(null);
 }
