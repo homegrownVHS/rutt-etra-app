@@ -21,6 +21,7 @@ let lfoOffsetX, lfoOffsetY;
 // --- FX globals --------------------------------------------------------------
 let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect, temporalSlider, depthSmoothSlider;
 let fovSlider, lightAmtSlider, lightAzSlider, lightElSlider;
+let lineWidthSlider;
 
 // Uniform location caches – populated on first use, valid for program lifetime
 let progUniCache = {}, blurUniCache = {}, compUniCache = {};
@@ -569,14 +570,14 @@ function buildScanlineVBO(srcW, srcH, step) {
 
 // Upload source pixels to GPU texture each frame
 function updateTexture(src) {
-  gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
-  // Row 0 of the source (top) lands at V=0 in the GL texture without any flip.
-  // Our UV mapping also puts ny=0 at the screen top, so direct sampling is correct.
-  gl2.pixelStorei(gl2.UNPACK_FLIP_Y_WEBGL, false);
   let elt = src.canvas ? src.canvas : (src.elt ? src.elt : src);
-  try {
-    gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, elt);
-  } catch (e) { /* video frame not ready yet */ }
+  // For video elements, skip upload until at least one frame is decoded.
+  // readyState < HAVE_CURRENT_DATA (2) means no pixel data available yet,
+  // which would trigger INVALID_VALUE from texImage2D every frame.
+  if (elt instanceof HTMLVideoElement && elt.readyState < 2) return;
+  gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
+  gl2.pixelStorei(gl2.UNPACK_FLIP_Y_WEBGL, false);
+  gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, elt);
   gl2.bindTexture(gl2.TEXTURE_2D, null);
 }
 
@@ -664,6 +665,7 @@ function setup() {
   lightAmtSlider   = select("#lightAmtSlider");
   lightAzSlider    = select("#lightAzSlider");
   lightElSlider    = select("#lightElSlider");
+  lineWidthSlider  = select("#lineWidthSlider");
 
   horizAmpSlider = select("#horizAmpSlider");
   vertAmpSlider  = select("#vertAmpSlider");
@@ -877,6 +879,7 @@ function renderLoop() {
   const lightAmt      = Number(lightAmtSlider.value());
   const lightAz       = Number(lightAzSlider.value()) * Math.PI / 180.0;
   const lightEl       = Number(lightElSlider.value()) * Math.PI / 180.0;
+  const lineWidth     = Number(lineWidthSlider.value());
 
   // Update video scrubber
   if (uploadedType === 'video' && uploadedMedia) {
@@ -916,6 +919,7 @@ function renderLoop() {
   select("#lightAmtLabel").html(lightAmt.toFixed(2));
   select("#lightAzLabel").html(Math.round(lightAz * 180 / Math.PI) + '\u00B0');
   select("#lightElLabel").html(Math.round(lightEl * 180 / Math.PI) + '\u00B0');
+  select("#lineWidthLabel").html(lineWidth.toFixed(2));
   // Smooth rotation
   rotX += (targetRotX - rotX) * 0.1;
   rotY += (targetRotY - rotY) * 0.1;
@@ -1081,8 +1085,8 @@ function renderLoop() {
   gl2.uniform1f(ul('u_lightAmt'),            lightAmt);
   gl2.uniform1f(ul('u_lightAz'),             lightAz);
   gl2.uniform1f(ul('u_lightEl'),             lightEl);
-  // tube fill: sheen=0 -> fills gap (0.48), sheen=1 -> tight line (0.09)
-  const tubeFill       = 0.48 - Math.min(sheen, 1.0) * 0.39;
+  // tube fill: lineWidth sets base gap fraction; sheen shrinks it toward 19% (tight 3D line)
+  const tubeFill       = lineWidth * (1.0 - Math.min(sheen, 1.0) * 0.81);
   const tubeHalfNDC    = (step * scl * sf * vertAmp)  / (CH / 2) * tubeFill;
   const tubeHalfColNDC = (step * scl * sf * horizAmp) / (CW / 2) * tubeFill;
 
@@ -1251,6 +1255,7 @@ function resetParams() {
     ['#lightAmtSlider',   '0'],
     ['#lightAzSlider',    '45'],
     ['#lightElSlider',    '45'],
+    ['#lineWidthSlider',  '0.48'],
   ];
   defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
   document.querySelector('#paletteSelect').value  = '0';
