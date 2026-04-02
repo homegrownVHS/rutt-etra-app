@@ -6,7 +6,7 @@
 let cam, uploadedMedia, uploadedType = null;
 
 let depthSlider, tiltXSlider, tiltYSlider, scaleSlider, densitySlider;
-let camSelect, imgInput, vidInput;
+let camSelect, mediaInput;
 
 let lfoDepth, lfoTiltX, lfoTiltY, lfoScale, lfoFreqSlider, lfoAmpSlider, lfoTypeSelector;
 let lfoShapeX, lfoShapeY, lfoWaveAmp, lfoWaveFreq;
@@ -627,8 +627,7 @@ function setup() {
   scaleSlider   = select("#scaleSlider");
   densitySlider = select("#densitySlider");
   camSelect     = select("#camSelect");
-  imgInput      = select("#imgInput");
-  vidInput      = select("#vidInput");
+  mediaInput    = select("#mediaInput");
 
   lfoDepth        = select("#lfoDepth");
   lfoTiltX        = select("#lfoTiltX");
@@ -718,8 +717,7 @@ function setup() {
   controlsDiv.mouseOver(() => controlsHovering = true);
   controlsDiv.mouseOut (() => controlsHovering = false);
 
-  imgInput.changed(handleImageUpload);
-  vidInput.changed(handleVideoUpload);
+  mediaInput.changed(handleMediaUpload);
 
   // Native drag-and-drop on the GPU canvas
   canvas.addEventListener('dragover', e => e.preventDefault());
@@ -1225,16 +1223,25 @@ function startCam(deviceId) {
   cam.elt.onerror = e => { console.error('Camera error:', e); currentSourceReady = false; cam = null; };
 }
 
-function handleImageUpload() {
+function handleMediaUpload() {
+  if (!mediaInput.elt.files.length) return;
+  const file = mediaInput.elt.files[0];
+  if (file.type.startsWith('image/')) {
+    handleImageUpload(file);
+  } else if (file.type.startsWith('video/')) {
+    handleVideoUpload(file);
+  }
+}
+
+function handleImageUpload(file) {
   currentSourceReady = false;
   if (cam) { cam.remove(); cam = null; }
   uploadedMedia = null; uploadedType = null;
-  if (imgInput.elt.files.length > 0) {
-    loadImage(URL.createObjectURL(imgInput.elt.files[0]), img => {
-      img.resize(640, 480);
-      uploadedMedia = img; uploadedType = 'image'; currentSourceReady = true;
-    }, e => console.error('Image error:', e));
-  }
+  hideVideoControls();
+  loadImage(URL.createObjectURL(file), img => {
+    img.resize(640, 480);
+    uploadedMedia = img; uploadedType = 'image'; currentSourceReady = true;
+  }, e => console.error('Image error:', e));
 }
 
 function resetParams() {
@@ -1279,24 +1286,22 @@ function resetParams() {
     .forEach(sel => { document.querySelector(sel).checked = false; });
 }
 
-function handleVideoUpload() {
+function handleVideoUpload(file) {
   currentSourceReady = false;
   if (cam) { cam.remove(); cam = null; }
   uploadedMedia = null; uploadedType = null;
-  if (vidInput.elt.files.length > 0) {
-    const vid = createVideo([URL.createObjectURL(vidInput.elt.files[0])]);
-    vid.elt.onloadedmetadata = () => {
-      if (vid.elt.videoWidth === 0 || vid.elt.videoHeight === 0) {
-        console.error('Video codec not supported by this browser (videoWidth=0). Try MP4/H.264.');
-        uploadedMedia = null; currentSourceReady = false; return;
-      }
-      vid.size(640, 480); vid.hide(); vid.loop(); vid.volume(0);
-      uploadedMedia = vid; uploadedType = 'video'; currentSourceReady = true;
-      showVideoControls(vid);
-    };
-    vid.elt.onerror = e => { console.error('Video error:', e); currentSourceReady = false; uploadedMedia = null; };
-    vid.elt.load();
-  }
+  const vid = createVideo([URL.createObjectURL(file)]);
+  vid.elt.onloadedmetadata = () => {
+    if (vid.elt.videoWidth === 0 || vid.elt.videoHeight === 0) {
+      console.error('Video codec not supported by this browser (videoWidth=0). Try MP4/H.264.');
+      uploadedMedia = null; currentSourceReady = false; return;
+    }
+    vid.size(640, 480); vid.hide(); vid.loop(); vid.volume(0);
+    uploadedMedia = vid; uploadedType = 'video'; currentSourceReady = true;
+    showVideoControls(vid);
+  };
+  vid.elt.onerror = e => { console.error('Video error:', e); currentSourceReady = false; uploadedMedia = null; };
+  vid.elt.load();
 }
 
 function _loadDroppedImage(url) {
