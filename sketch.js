@@ -780,10 +780,11 @@ function setup() {
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
       const sEl = document.getElementById('scaleSlider');
-      const step = 0.05;
-      const next = Math.max(Number(sEl.min), Math.min(Number(sEl.max),
-                    Number(sEl.value) - Math.sign(e.deltaY) * step));
-      sEl.value          = next;
+      // Use delta matching the slider step (0.1) and round to avoid
+      // IEEE 754 drift (e.g. 2.3+0.05 = 2.3499... snaps back to 2.3 forever).
+      const raw  = Number(sEl.value) - Math.sign(e.deltaY) * 0.1;
+      const next = Math.round(Math.max(Number(sEl.min), Math.min(Number(sEl.max), raw)) * 100) / 100;
+      sEl.value             = next;
       scaleSlider.elt.value = next;
     }, { passive: false });
   }
