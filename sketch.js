@@ -726,7 +726,7 @@ function setup() {
     const file = e.dataTransfer.files[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
-    if (file.type.startsWith('image/'))      _loadDroppedImage(url);
+    if (file.type.startsWith('image/'))      _loadDroppedImage(url, file.name);
     else if (file.type.startsWith('video/')) _loadDroppedVideo(url);
   });
 
@@ -1223,6 +1223,38 @@ function startCam(deviceId) {
   cam.elt.onerror = e => { console.error('Camera error:', e); currentSourceReady = false; cam = null; };
 }
 
+function _isTiff(typeOrName) {
+  return /tiff?$/i.test(typeOrName) || typeOrName === 'image/tiff';
+}
+
+// Decode a TIFF from a URL (blob: or object URL) using UTIF, resize to 640x480,
+// then store as a plain canvas object that updateTexture() can upload.
+function _loadTiff(url, onReady) {
+  fetch(url)
+    .then(r => r.arrayBuffer())
+    .then(buf => {
+      const ifds = UTIF.decode(buf);
+      UTIF.decodeImages(buf, ifds);
+      const ifd  = ifds[0];
+      const rgba = UTIF.toRGBA8(ifd);
+      // Draw full-res onto a temp canvas
+      const tmp  = document.createElement('canvas');
+      tmp.width  = ifd.width;
+      tmp.height = ifd.height;
+      const tctx = tmp.getContext('2d');
+      const id   = tctx.createImageData(ifd.width, ifd.height);
+      id.data.set(rgba);
+      tctx.putImageData(id, 0, 0);
+      // Resize to 640x480 into a second canvas
+      const out  = document.createElement('canvas');
+      out.width  = 640;
+      out.height = 480;
+      out.getContext('2d').drawImage(tmp, 0, 0, 640, 480);
+      onReady(out);
+    })
+    .catch(e => console.error('TIFF load error:', e));
+}
+
 function handleMediaUpload() {
   if (!mediaInput.elt.files.length) return;
   const file = mediaInput.elt.files[0];
@@ -1238,7 +1270,14 @@ function handleImageUpload(file) {
   if (cam) { cam.remove(); cam = null; }
   uploadedMedia = null; uploadedType = null;
   hideVideoControls();
-  loadImage(URL.createObjectURL(file), img => {
+  const url = URL.createObjectURL(file);
+  if (_isTiff(file.type) || _isTiff(file.name)) {
+    _loadTiff(url, canvas => {
+      uploadedMedia = { canvas }; uploadedType = 'image'; currentSourceReady = true;
+    });
+    return;
+  }
+  loadImage(url, img => {
     img.resize(640, 480);
     uploadedMedia = img; uploadedType = 'image'; currentSourceReady = true;
   }, e => console.error('Image error:', e));
@@ -1304,10 +1343,16 @@ function handleVideoUpload(file) {
   vid.elt.load();
 }
 
-function _loadDroppedImage(url) {
+function _loadDroppedImage(url, fileName) {
   currentSourceReady = false;
   if (cam) { cam.remove(); cam = null; }
   uploadedMedia = null; uploadedType = null;
+  if (fileName && (_isTiff(fileName))) {
+    _loadTiff(url, canvas => {
+      uploadedMedia = { canvas }; uploadedType = 'image'; currentSourceReady = true;
+    });
+    return;
+  }
   loadImage(url, img => {
     img.resize(640, 480);
     uploadedMedia = img; uploadedType = 'image'; currentSourceReady = true;
