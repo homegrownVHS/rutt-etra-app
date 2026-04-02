@@ -1273,7 +1273,7 @@ function handleImageUpload(file) {
   const url = URL.createObjectURL(file);
   if (_isTiff(file.type) || _isTiff(file.name)) {
     _loadTiff(url, canvas => {
-      uploadedMedia = { canvas }; uploadedType = 'image'; currentSourceReady = true;
+      uploadedMedia = canvas; uploadedType = 'image'; currentSourceReady = true;
     });
     return;
   }
@@ -1349,7 +1349,7 @@ function _loadDroppedImage(url, fileName) {
   uploadedMedia = null; uploadedType = null;
   if (fileName && (_isTiff(fileName))) {
     _loadTiff(url, canvas => {
-      uploadedMedia = { canvas }; uploadedType = 'image'; currentSourceReady = true;
+      uploadedMedia = canvas; uploadedType = 'image'; currentSourceReady = true;
     });
     return;
   }
