@@ -775,6 +775,17 @@ function setup() {
     });
 
     window.addEventListener('mouseup', () => { dragging = false; });
+
+    // Scroll-to-zoom: wheel on the GPU canvas adjusts the Scale slider
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      const sEl = document.getElementById('scaleSlider');
+      const step = 0.05;
+      const next = Math.max(Number(sEl.min), Math.min(Number(sEl.max),
+                    Number(sEl.value) - Math.sign(e.deltaY) * step));
+      sEl.value          = next;
+      scaleSlider.elt.value = next;
+    }, { passive: false });
   }
 
   navigator.mediaDevices.enumerateDevices().then(devices => {
