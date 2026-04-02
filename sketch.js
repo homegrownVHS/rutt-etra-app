@@ -571,10 +571,10 @@ function buildScanlineVBO(srcW, srcH, step) {
 // Upload source pixels to GPU texture each frame
 function updateTexture(src) {
   let elt = src.canvas ? src.canvas : (src.elt ? src.elt : src);
-  // For video elements, skip upload until at least one frame is decoded.
-  // readyState < HAVE_CURRENT_DATA (2) means no pixel data available yet,
-  // which would trigger INVALID_VALUE from texImage2D every frame.
-  if (elt instanceof HTMLVideoElement && elt.readyState < 2) return;
+  // Skip if video element has no decoded frame data.
+  // readyState < 2 means metadata not ready; videoWidth===0 means codec unsupported
+  // (e.g. .mov HEVC/ProRes that Chrome can't decode — metadata loads but pixels never come).
+  if (elt instanceof HTMLVideoElement && (elt.readyState < 2 || elt.videoWidth === 0)) return;
   gl2.bindTexture(gl2.TEXTURE_2D, srcTexture);
   gl2.pixelStorei(gl2.UNPACK_FLIP_Y_WEBGL, false);
   gl2.texImage2D(gl2.TEXTURE_2D, 0, gl2.RGBA, gl2.RGBA, gl2.UNSIGNED_BYTE, elt);
@@ -910,7 +910,7 @@ function renderLoop() {
   select("#bloomLabel").html(bloomAmt.toFixed(2));
   select("#paletteAmtLabel").html(paletteAmt.toFixed(2));
   select("#temporalLabel").html(temporal.toFixed(2));
-  select("#depthSmoothLabel").html(depthSmooth.toFixed(0));
+  select("#depthSmoothLabel").html(depthSmooth.toFixed(1));
   select("#horizAmpLabel").html(horizAmp.toFixed(1));
   select("#vertAmpLabel").html(vertAmp.toFixed(1));
   select("#offsetXLabel").html(offsetX.toFixed(0));
@@ -1274,6 +1274,10 @@ function handleVideoUpload() {
   if (vidInput.elt.files.length > 0) {
     const vid = createVideo([URL.createObjectURL(vidInput.elt.files[0])]);
     vid.elt.onloadedmetadata = () => {
+      if (vid.elt.videoWidth === 0 || vid.elt.videoHeight === 0) {
+        console.error('Video codec not supported by this browser (videoWidth=0). Try MP4/H.264.');
+        uploadedMedia = null; currentSourceReady = false; return;
+      }
       vid.size(640, 480); vid.hide(); vid.loop(); vid.volume(0);
       uploadedMedia = vid; uploadedType = 'video'; currentSourceReady = true;
       showVideoControls(vid);
@@ -1299,6 +1303,10 @@ function _loadDroppedVideo(url) {
   uploadedMedia = null; uploadedType = null;
   const vid = createVideo([url]);
   vid.elt.onloadedmetadata = () => {
+    if (vid.elt.videoWidth === 0 || vid.elt.videoHeight === 0) {
+      console.error('Video codec not supported by this browser (videoWidth=0). Try MP4/H.264.');
+      uploadedMedia = null; currentSourceReady = false; return;
+    }
     vid.size(640, 480); vid.hide(); vid.loop(); vid.volume(0);
     uploadedMedia = vid; uploadedType = 'video'; currentSourceReady = true;
     showVideoControls(vid);
