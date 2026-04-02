@@ -1234,7 +1234,7 @@ function _loadTiff(url, onReady) {
     .then(r => r.arrayBuffer())
     .then(buf => {
       const ifds = UTIF.decode(buf);
-      UTIF.decodeImages(buf, ifds);
+      UTIF.decodeImage(buf, ifds[0]);
       const ifd  = ifds[0];
       const rgba = UTIF.toRGBA8(ifd);
       // Draw full-res onto a temp canvas
