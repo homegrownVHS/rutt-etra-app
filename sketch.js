@@ -29,6 +29,7 @@ let progUniCache = {}, blurUniCache = {}, compUniCache = {};
 let currentSourceReady = false;
 let selectedDeviceId = null;
 let controlsHovering = false;
+let mouseInteractionEnabled = true;
 
 let rotX = 30, rotY = 0;
 let targetRotX = 30, targetRotY = 0;
@@ -155,17 +156,22 @@ void main() {
   float Rx = W / (PI * 2.0);   // equatorial radius  (arc = W when wrapH=1)
   float Ry = H / PI;            // meridional radius  (arc = H when wrapV=1)
 
-  float lon = (nx - 0.5) * PI * 2.0 * u_shapeX;   // -π..+π
-  float lat = (ny - 0.5) * PI       * u_shapeY;    // -π/2..+π/2
+  // abs() drives the xy sphere shape so both ±directions form a valid sphere.
+  // The sign is preserved only for foldZ so negative = concave (folds toward viewer).
+  float absShapeX = abs(u_shapeX);
+  float absShapeY = abs(u_shapeY);
+
+  float lon = (nx - 0.5) * PI * 2.0 * absShapeX;   // -π..+π
+  float lat = (ny - 0.5) * PI       * absShapeY;    // -π/2..+π/2
 
   // Sphere surface positions (relative to raster centre)
   float sphX = Rx * cos(lat) * sin(lon);   // ← cos(lat) is what makes it a sphere
   float sphY = Ry * sin(lat);
 
-  float px = W * 0.5 + mix((nx - 0.5) * W, sphX, u_shapeX) + waveX;
-  float py = H * 0.5 + mix((ny - 0.5) * H, sphY, u_shapeY) + waveY;
+  float px = W * 0.5 + mix((nx - 0.5) * W, sphX, absShapeX) + waveX;
+  float py = H * 0.5 + mix((ny - 0.5) * H, sphY, absShapeY) + waveY;
 
-  // Fold-back z: push wrapped edges away from the viewer.
+  // Fold z: positive = edges fold away (convex), negative = edges fold toward viewer (concave).
   // foldZH is modulated by cos(lat) so the equatorial fold reduces near the poles.
   float foldZH = Rx * cos(lat) * (1.0 - cos(lon)) * u_shapeX;
   float foldZV = Ry * (1.0 - cos(lat))             * u_shapeY;
@@ -734,9 +740,10 @@ function setup() {
   {
     let dragging = false, dragButton = -1, lastX = 0, lastY = 0;
 
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    canvas.addEventListener('contextmenu', e => { if (mouseInteractionEnabled) e.preventDefault(); });
 
     canvas.addEventListener('mousedown', e => {
+      if (!mouseInteractionEnabled) return;
       if (e.button !== 0 && e.button !== 2) return;
       dragging    = true;
       dragButton  = e.button;
@@ -776,6 +783,7 @@ function setup() {
 
     // Scroll-to-zoom: wheel on the GPU canvas adjusts the Scale slider
     canvas.addEventListener('wheel', e => {
+      if (!mouseInteractionEnabled) return;
       e.preventDefault();
       const sEl = document.getElementById('scaleSlider');
       // Use delta matching the slider step (0.1) and round to avoid
@@ -814,6 +822,35 @@ function setup() {
 
 // p5 draw() is intentionally empty -- rendering happens in renderLoop()
 function draw() {}
+
+// --- Hotkeys ----------------------------------------------------------------
+function keyPressed() {
+  // M  →  toggle canvas mouse interaction (drag/scroll/right-click)
+  if (key === 'm' || key === 'M') {
+    mouseInteractionEnabled = !mouseInteractionEnabled;
+    showToast(mouseInteractionEnabled ? 'Mouse interaction ON' : 'Mouse interaction OFF (M to re-enable)');
+    return false; // prevent browser default
+  }
+}
+
+function showToast(msg) {
+  let t = document.getElementById('_hotkeyToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '_hotkeyToast';
+    Object.assign(t.style, {
+      position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+      background: 'rgba(0,0,0,0.75)', color: '#fff', padding: '8px 18px',
+      borderRadius: '6px', fontSize: '14px', pointerEvents: 'none',
+      zIndex: 9999, transition: 'opacity 0.4s'
+    });
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._tid);
+  t._tid = setTimeout(() => { t.style.opacity = '0'; }, 2000);
+}
 
 // --- Video scrub state ------------------------------------------------------
 let vidPlayPauseBtn, vidLoopChk, vidScrubber, vidTimeLabel;
@@ -862,9 +899,9 @@ function renderLoop() {
   const tiltY  = baseTiltY + (lfoTiltY.checked() ? lfo * Math.PI * lfoAmp : 0);
   const scl    = baseScale + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
 
-  // Slider is 0-100; normalise to 0-1 for shader
-  const shapeX   = Math.max(0, Math.min(1, (Number(shapeXSlider.value()) + (lfoShapeX.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
-  const shapeY   = Math.max(0, Math.min(1, (Number(shapeYSlider.value()) + (lfoShapeY.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
+  // Slider is -100..100; normalise to -1..1 for shader
+  const shapeX   = Math.max(-1, Math.min(1, (Number(shapeXSlider.value()) + (lfoShapeX.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
+  const shapeY   = Math.max(-1, Math.min(1, (Number(shapeYSlider.value()) + (lfoShapeY.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
   const waveAmp  = Number(waveAmpSlider.value()) + (lfoWaveAmp.checked() ? lfo * 200 * lfoAmp : 0);
   const waveFreq = Math.max(0, Number(waveFreqSlider.value()) + (lfoWaveFreq.checked() ? lfo * 20 * lfoAmp : 0));
 
