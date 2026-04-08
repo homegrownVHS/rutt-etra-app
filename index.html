@@ -150,6 +150,7 @@
         <option value="H">Horizontal</option>
         <option value="V">Vertical</option>
         <option value="X">Both (Grid)</option>
+        <option value="P">Polar (Radial)</option>
       </select>
     </div>
     <div class="control-group">
@@ -224,6 +225,18 @@
       <label>Saturation <span id="satLabel">1.00</span></label>
       <input type="range" id="satSlider" min="0" max="2" value="1" step="0.01">
       <label class="sub"><input type="checkbox" id="lfoSat"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Depth Colorize <span id="depthColorizeLabel">0.00</span></label>
+      <input type="range" id="depthColorizeSlider" min="0" max="1" value="0" step="0.01">
+    </div>
+    <div class="control-group">
+      <label>Colorize Palette</label>
+      <select id="depthColorPaletteSelect">
+        <option value="0">Spectrum (blue→red)</option>
+        <option value="1">Heat (black→white)</option>
+        <option value="2">Neon (purple→cyan)</option>
+      </select>
     </div>
 
     <!-- FX -->

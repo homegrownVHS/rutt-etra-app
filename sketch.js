@@ -24,6 +24,7 @@ let depthMinSlider, depthMaxSlider, invertDepthChk;
 let lfoPhaseOffsetSlider;
 let fovSlider, lightAmtSlider, lightAzSlider, lightElSlider;
 let lineWidthSlider;
+let depthColorizeSlider, depthColorPaletteSelect;
 
 // Uniform location caches – populated on first use, valid for program lifetime
 let progUniCache = {}, blurUniCache = {}, compUniCache = {};
@@ -78,6 +79,7 @@ uniform int   u_invertDepth;   // 1 = flip bright/dark driving z
 uniform int   u_colorSmooth;   // 1 = pull colour from blurred depthTex
 
 in float a_tubeT;
+in float a_tubeAngle;          // clip-space tube extension direction (radians)
 
 out vec4  v_color;
 out float v_tubeT;
@@ -198,8 +200,8 @@ void main() {
   vec4 clipPos = u_mvp * vec4(px, py, z, 1.0);
   // Multiply by clipPos.w so the NDC offset is constant after perspective divide.
   // With ortho clip.w=1 (no change); with perspective clip.w=D-z, compensating for foreshortening.
-  clipPos.x += a_tubeT * u_tubeWidth * clipPos.w *        u_tubeAxis;
-  clipPos.y += a_tubeT * u_tubeWidth * clipPos.w * (1.0 - u_tubeAxis);
+  clipPos.x += a_tubeT * u_tubeWidth * clipPos.w * cos(a_tubeAngle);
+  clipPos.y += a_tubeT * u_tubeWidth * clipPos.w * sin(a_tubeAngle);
   v_z = gammaBright;
   gl_Position = clipPos;
 }
@@ -222,7 +224,30 @@ uniform float u_hueShift;  // hue rotation in radians
 uniform float u_lightAmt;
 uniform float u_lightAz;
 uniform float u_lightEl;
+uniform float u_depthColorize;
+uniform int   u_depthColorPalette;  // 0=spectrum, 1=heat, 2=neon
 out vec4 fragColor;
+
+// Depth-gradient palette: maps v_z (0-1) to a colour
+vec3 depthGradient(float t, int mode) {
+  t = clamp(t, 0.0, 1.0);
+  if (mode == 1) {
+    // Heat: black → red → orange/yellow → white
+    if (t < 0.33) return mix(vec3(0.0), vec3(1.0, 0.0, 0.0), t * 3.03);
+    if (t < 0.67) return mix(vec3(1.0, 0.0, 0.0), vec3(1.0, 0.8, 0.0), (t - 0.33) * 2.94);
+    return mix(vec3(1.0, 0.8, 0.0), vec3(1.0), (t - 0.67) * 3.03);
+  }
+  if (mode == 2) {
+    // Neon: deep purple → magenta → cyan
+    if (t < 0.5) return mix(vec3(0.2, 0.0, 0.4), vec3(1.0, 0.0, 1.0), t * 2.0);
+    return mix(vec3(1.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), (t - 0.5) * 2.0);
+  }
+  // mode == 0 (default): Spectrum  blue → cyan → green → yellow → red
+  if (t < 0.25) return mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), t * 4.0);
+  if (t < 0.5)  return mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), (t - 0.25) * 4.0);
+  if (t < 0.75) return mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), (t - 0.5) * 4.0);
+  return mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), (t - 0.75) * 4.0);
+}
 
 // Rotate hue by angle (radians) — rotates around the (1,1,1) axis in RGB space
 vec3 hueRotate(vec3 col, float angle) {
@@ -258,6 +283,11 @@ void main() {
   // Saturation: 0=greyscale, 1=normal, 2=vivid
   float luma = dot(lit, vec3(0.299, 0.587, 0.114));
   lit = mix(vec3(luma), lit, u_saturation);
+  // Depth colorize: blend source colour toward a depth-driven gradient
+  if (u_depthColorize > 0.0) {
+    vec3 gc = depthGradient(v_z, u_depthColorPalette);
+    lit = mix(lit, gc, u_depthColorize);
+  }
   fragColor = vec4(clamp(lit, 0.0, 1.0), 1.0);
 }
 `;
@@ -339,6 +369,9 @@ let depthBlurW = -1, depthBlurH = -1;
 // --- Column VBO globals ------------------------------------------------------
 let colVAO, colVBO;
 let lastColW = -1, lastColH = -1, lastColStep = -1;
+let polVAO, polVBO;
+let lastPolW = -1, lastPolH = -1, lastPolStep = -1;
+let polCounts = [], polOffsets = [];
 let colCounts = [], colOffsets = [];
 
 // --- Matrix helpers (column-major, matching WebGL convention) ----------------
@@ -526,8 +559,8 @@ function buildColumnVBO(srcW, srcH, step) {
     colOffsets.push(offset);
     for (let row = 0; row < rows; row++) {
       const ny = (row * step + step * 0.5) / srcH;
-      uvs.push(nx, ny, -1.0);
-      uvs.push(nx, ny,  1.0);
+      uvs.push(nx, ny, -1.0, 0.0);  // tubeAngle 0.0 = +X clip (perpendicular to vertical scan)
+      uvs.push(nx, ny,  1.0, 0.0);
     }
     colCounts.push(rows * 2);
     offset += rows * 2;
@@ -537,10 +570,54 @@ function buildColumnVBO(srcW, srcH, step) {
   gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(uvs), gl2.DYNAMIC_DRAW);
   const aUV   = gl2.getAttribLocation(prog, 'a_uv');
   gl2.enableVertexAttribArray(aUV);
-  gl2.vertexAttribPointer(aUV, 2, gl2.FLOAT, false, 12, 0);
+  gl2.vertexAttribPointer(aUV, 2, gl2.FLOAT, false, 16, 0);
   const aTubeT = gl2.getAttribLocation(prog, 'a_tubeT');
   gl2.enableVertexAttribArray(aTubeT);
-  gl2.vertexAttribPointer(aTubeT, 1, gl2.FLOAT, false, 12, 8);
+  gl2.vertexAttribPointer(aTubeT, 1, gl2.FLOAT, false, 16, 8);
+  const aTubeAngleC = gl2.getAttribLocation(prog, 'a_tubeAngle');
+  gl2.enableVertexAttribArray(aTubeAngleC);
+  gl2.vertexAttribPointer(aTubeAngleC, 1, gl2.FLOAT, false, 16, 12);
+  gl2.bindVertexArray(null);
+}
+
+function buildPolarVBO(srcW, srcH, step) {
+  if (srcW === lastPolW && srcH === lastPolH && step === lastPolStep) return;
+  lastPolW = srcW; lastPolH = srcH; lastPolStep = step;
+  const minDim  = Math.min(srcW, srcH);
+  const maxR    = Math.SQRT2 / 2;                              // reaches all corners of UV [0,1]
+  const nSpokes = Math.max(8, Math.round(Math.PI * minDim / step));
+  const nPts    = Math.max(2, Math.ceil(maxR * minDim / step));
+  polCounts = []; polOffsets = [];
+  const uvs = [];
+  let offset = 0;
+  for (let si = 0; si < nSpokes; si++) {
+    const theta   = (2 * Math.PI * si) / nSpokes;
+    const cosT    = Math.cos(theta);
+    const sinT    = Math.sin(theta);
+    const tubeAng = Math.PI / 2 - theta; // clip-space perpendicular to this spoke direction
+    polOffsets.push(offset);
+    for (let ri = 0; ri < nPts; ri++) {
+      const r = (ri + 0.5) / nPts * maxR;
+      const u = 0.5 + r * cosT;
+      const v = 0.5 + r * sinT;
+      uvs.push(u, v, -1.0, tubeAng);
+      uvs.push(u, v,  1.0, tubeAng);
+    }
+    polCounts.push(nPts * 2);
+    offset += nPts * 2;
+  }
+  gl2.bindVertexArray(polVAO);
+  gl2.bindBuffer(gl2.ARRAY_BUFFER, polVBO);
+  gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(uvs), gl2.DYNAMIC_DRAW);
+  const aUVp = gl2.getAttribLocation(prog, 'a_uv');
+  gl2.enableVertexAttribArray(aUVp);
+  gl2.vertexAttribPointer(aUVp, 2, gl2.FLOAT, false, 16, 0);
+  const aTubeTp = gl2.getAttribLocation(prog, 'a_tubeT');
+  gl2.enableVertexAttribArray(aTubeTp);
+  gl2.vertexAttribPointer(aTubeTp, 1, gl2.FLOAT, false, 16, 8);
+  const aTubeAngleP = gl2.getAttribLocation(prog, 'a_tubeAngle');
+  gl2.enableVertexAttribArray(aTubeAngleP);
+  gl2.vertexAttribPointer(aTubeAngleP, 1, gl2.FLOAT, false, 16, 12);
   gl2.bindVertexArray(null);
 }
 
@@ -561,8 +638,8 @@ function buildScanlineVBO(srcW, srcH, step) {
     rowOffsets.push(offset);
     for (let col = 0; col < cols; col++) {
       const nx = (col * step + step * 0.5) / srcW;
-      uvs.push(nx, ny, -1.0);  // tube top (NDC-down)
-      uvs.push(nx, ny,  1.0);  // tube bottom (NDC-up)
+      uvs.push(nx, ny, -1.0, Math.PI / 2);  // tubeAngle PI/2 = +Y clip (perpendicular to H scan)
+      uvs.push(nx, ny,  1.0, Math.PI / 2);
     }
     rowCounts.push(cols * 2);
     offset += cols * 2;
@@ -573,10 +650,13 @@ function buildScanlineVBO(srcW, srcH, step) {
   gl2.bufferData(gl2.ARRAY_BUFFER, new Float32Array(uvs), gl2.DYNAMIC_DRAW);
   const aUV = gl2.getAttribLocation(prog, 'a_uv');
   gl2.enableVertexAttribArray(aUV);
-  gl2.vertexAttribPointer(aUV, 2, gl2.FLOAT, false, 12, 0);
+  gl2.vertexAttribPointer(aUV, 2, gl2.FLOAT, false, 16, 0);
   const aTubeT = gl2.getAttribLocation(prog, 'a_tubeT');
   gl2.enableVertexAttribArray(aTubeT);
-  gl2.vertexAttribPointer(aTubeT, 1, gl2.FLOAT, false, 12, 8);
+  gl2.vertexAttribPointer(aTubeT, 1, gl2.FLOAT, false, 16, 8);
+  const aTubeAngleH = gl2.getAttribLocation(prog, 'a_tubeAngle');
+  gl2.enableVertexAttribArray(aTubeAngleH);
+  gl2.vertexAttribPointer(aTubeAngleH, 1, gl2.FLOAT, false, 16, 12);
   gl2.bindVertexArray(null);
 }
 
@@ -622,6 +702,8 @@ function setup() {
   lineVBO = gl2.createBuffer();
   colVAO  = gl2.createVertexArray();
   colVBO  = gl2.createBuffer();
+  polVAO  = gl2.createVertexArray();
+  polVBO  = gl2.createBuffer();
   buildQuadVAO();
 
   srcTexture = gl2.createTexture();
@@ -679,6 +761,8 @@ function setup() {
   invertDepthChk    = select("#invertDepthChk");
   colorSmoothChk    = select("#colorSmoothChk");
   lfoPhaseOffsetSlider = select("#lfoPhaseOffsetSlider");
+  depthColorizeSlider    = select("#depthColorizeSlider");
+  depthColorPaletteSelect = select("#depthColorPaletteSelect");
   scanModeSelect    = select("#scanModeSelect");
   temporalSlider    = select("#temporalSlider");
   depthSmoothSlider = select("#depthSmoothSlider");
@@ -922,7 +1006,9 @@ function renderLoop() {
   const contact     = Number(contactSlider.value());
   const fog         = Number(fogSlider.value());
   const fogInvert   = fogInvertChk.elt.checked ? 1 : 0;
-  const bloomAmt    = Number(bloomSlider.value());
+  const bloomAmt       = Number(bloomSlider.value());
+  const depthColorize  = Number(depthColorizeSlider.value());
+  const depthColorPalette = parseInt(depthColorPaletteSelect.value());
   const hueShift    = Number(hueShiftSlider.value()) + (lfoHueShift.checked() ? lfo * 180 * lfoAmp : 0);
   const saturation  = Math.max(0, Number(satSlider.value())   + (lfoSat.checked()     ? lfo * 1.0 * lfoAmp : 0));
   const depthMin    = Number(depthMinSlider.value()) / 100.0;
@@ -965,6 +1051,7 @@ function renderLoop() {
   select("#contactLabel").html(contact.toFixed(2));
   select("#fogLabel").html(fog.toFixed(2));
   select("#bloomLabel").html(bloomAmt.toFixed(2));
+  select("#depthColorizeLabel").html(depthColorize.toFixed(2));
   select("#hueShiftLabel").html(Math.round(hueShift) + '\u00B0');
   select("#satLabel").html(saturation.toFixed(2));
   select("#depthMinLabel").html(Math.round(depthMin * 100) + '%');
@@ -1149,6 +1236,8 @@ function renderLoop() {
   gl2.uniform1f(ul('u_lightAmt'),            lightAmt);
   gl2.uniform1f(ul('u_lightAz'),             lightAz);
   gl2.uniform1f(ul('u_lightEl'),             lightEl);
+  gl2.uniform1f(ul('u_depthColorize'),       depthColorize);
+  gl2.uniform1i(ul('u_depthColorPalette'),   depthColorPalette);
   // tube fill: lineWidth sets base gap fraction; sheen shrinks it toward 19% (tight 3D line)
   const tubeFill       = lineWidth * (1.0 - Math.min(sheen, 1.0) * 0.81);
   const tubeHalfNDC    = (step * scl * sf * vertAmp)  / (CH / 2) * tubeFill;
@@ -1162,7 +1251,7 @@ function renderLoop() {
   gl2.uniform1i(ul('u_depthTex'), 1);
 
   // Horizontal scanlines
-  if (scanMode !== 'V') {
+  if (scanMode !== 'V' && scanMode !== 'P') {
     gl2.uniform1f(ul('u_tubeAxis'),  0.0);
     gl2.uniform1f(ul('u_tubeWidth'), tubeHalfNDC);
     gl2.bindVertexArray(vao);
@@ -1172,13 +1261,24 @@ function renderLoop() {
   }
 
   // Vertical scan columns
-  if (scanMode !== 'H') {
+  if (scanMode !== 'H' && scanMode !== 'P') {
     buildColumnVBO(srcW, srcH, step);
     gl2.uniform1f(ul('u_tubeAxis'),  1.0);
     gl2.uniform1f(ul('u_tubeWidth'), tubeHalfColNDC);
     gl2.bindVertexArray(colVAO);
     for (let i = 0; i < colCounts.length; i++)
       gl2.drawArrays(gl2.TRIANGLE_STRIP, colOffsets[i], colCounts[i]);
+    gl2.bindVertexArray(null);
+  }
+
+  // Polar (radial) scan
+  if (scanMode === 'P') {
+    buildPolarVBO(srcW, srcH, step);
+    gl2.uniform1f(ul('u_tubeAxis'),  0.0);  // H-convention for contact shadow
+    gl2.uniform1f(ul('u_tubeWidth'), tubeHalfNDC);
+    gl2.bindVertexArray(polVAO);
+    for (let i = 0; i < polCounts.length; i++)
+      gl2.drawArrays(gl2.TRIANGLE_STRIP, polOffsets[i], polCounts[i]);
     gl2.bindVertexArray(null);
   }
 
@@ -1363,9 +1463,11 @@ function resetParams() {
     ['#lightAzSlider',       '45'],
     ['#lightElSlider',       '45'],
     ['#lineWidthSlider',     '0.48'],
+    ['#depthColorizeSlider', '0'],
   ];
   defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
   document.querySelector('#scanModeSelect').value = 'H';
+  document.querySelector('#depthColorPaletteSelect').value = '0';
   document.querySelector('#lfoType').value        = 'saw';
   ['#invertDepthChk','#fogInvertChk','#colorSmoothChk'].forEach(sel => {
     document.querySelector(sel).checked = false;
