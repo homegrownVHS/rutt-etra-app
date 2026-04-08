@@ -19,7 +19,7 @@ let offsetXSlider, offsetYSlider;
 let lfoOffsetX, lfoOffsetY;
 
 // --- FX globals --------------------------------------------------------------
-let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, paletteSelect, paletteAmtSlider, scanModeSelect, temporalSlider, depthSmoothSlider;
+let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, hueShiftSlider, lfoHueShift, scanModeSelect, temporalSlider, depthSmoothSlider;
 let fovSlider, lightAmtSlider, lightAzSlider, lightElSlider;
 let lineWidthSlider;
 
@@ -29,7 +29,7 @@ let progUniCache = {}, blurUniCache = {}, compUniCache = {};
 let currentSourceReady = false;
 let selectedDeviceId = null;
 let controlsHovering = false;
-let mouseInteractionEnabled = true;
+let mouseInteractionEnabled = false;
 
 let rotX = 30, rotY = 0;
 let targetRotX = 30, targetRotY = 0;
@@ -37,10 +37,7 @@ let targetRotX = 30, targetRotY = 0;
 let lfoPhase = 0;
 
 let downloadBtn;
-let currentFrameForExportInput, totalFramesForExportInput, startExportBtn, nextFrameBtn, currentFrameLabel;
-let currentFrameForExport = 0;
-let totalFramesForExport = 0;
-let exportMode = false;
+
 
 // --- WebGL2 globals -----------------------------------------------------------
 let gl2, prog, vao, lineVBO, srcTexture;
@@ -79,6 +76,7 @@ out float v_tubeT;
 out float v_shadow;
 out float v_z;                 // per-vertex brightness (fog driver)
 out vec3  v_surfNormal;        // surface normal in view space
+out float v_alpha;             // source alpha (for discard of transparent pixels)
 
 uniform sampler2D u_tex;
 uniform sampler2D u_depthTex;
@@ -98,21 +96,21 @@ void main() {
   vec4 texC = texture(u_tex, a_uv);
   float g = texC.g;
   float b = texture(u_tex, vec2(clamp(a_uv.x + cs, 0.0, 1.0), a_uv.y)).b;
+  float texAlpha = texC.a;
 
   float bright = (r + g + b) / 3.0;
-  // Sample smoothed texture for Z to reduce temporal jitter
   vec3 ds = texture(u_depthTex, a_uv).rgb;
-  float brightDepth = (ds.r + ds.g + ds.b) / 3.0;
+  float brightDepth = mix(0.5, (ds.r + ds.g + ds.b) / 3.0, texAlpha);
   float gammaBright = applyGamma(brightDepth, u_gamma);
 
+  v_alpha = texAlpha;
   v_color = vec4(applyGamma(r, u_gamma),
                  applyGamma(g, u_gamma),
                  applyGamma(b, u_gamma),
                  1.0);
   v_tubeT = a_tubeT;
 
-  // Inter-line contact shadow: sample 2 rows above and below, take the worst occlusion
-  // Shadow sample direction: rows (Y) for horizontal scan, columns (X) for vertical
+  // Inter-line contact shadow
   vec2 sOff1 = u_tubeAxis < 0.5 ? vec2(0.0, u_rowStep)       : vec2(u_colStep,       0.0);
   vec2 sOff2 = u_tubeAxis < 0.5 ? vec2(0.0, u_rowStep * 2.0) : vec2(u_colStep * 2.0, 0.0);
   vec3 a1 = texture(u_depthTex, clamp(a_uv - sOff1, vec2(0.0), vec2(1.0))).rgb;
@@ -124,7 +122,7 @@ void main() {
   float occl   = clamp((max(nAbove, nBelow) - brightDepth) * 12.0, 0.0, 1.0);
   v_shadow = 1.0 - u_contactShadow * occl * 0.88;
 
-  // Surface normal from depth gradient (cross-direction samples)
+  // Surface normal from depth gradient
   vec2 sCross1 = u_tubeAxis < 0.5 ? vec2(u_colStep, 0.0) : vec2(0.0, u_rowStep);
   vec3 cxNear = texture(u_depthTex, clamp(a_uv - sCross1, vec2(0.0), vec2(1.0))).rgb;
   vec3 cxFar  = texture(u_depthTex, clamp(a_uv + sCross1, vec2(0.0), vec2(1.0))).rgb;
@@ -200,40 +198,28 @@ in float v_tubeT;
 in float v_shadow;
 in float v_z;
 in vec3  v_surfNormal;
+in float v_alpha;
 uniform float u_sheen;
 uniform float u_fog;
-uniform int   u_palette;
-uniform float u_paletteAmt;
+uniform float u_hueShift;  // hue rotation in radians
 uniform float u_lightAmt;
 uniform float u_lightAz;
 uniform float u_lightEl;
 out vec4 fragColor;
 
-vec3 applyPalette(vec3 col, int pal) {
-  float lum = dot(col, vec3(0.299, 0.587, 0.114));
-  if (pal == 1) return mix(vec3(0.0), vec3(0.12, 1.0, 0.18), lum);   // phosphor green (P31)
-  if (pal == 2) {                                                       // thermal
-    if (lum < 0.25) return mix(vec3(0.0,0.0,0.0), vec3(0.5,0.0,0.8), lum * 4.0);
-    if (lum < 0.5)  return mix(vec3(0.5,0.0,0.8), vec3(1.0,0.0,0.0), (lum-0.25)*4.0);
-    if (lum < 0.75) return mix(vec3(1.0,0.0,0.0), vec3(1.0,0.6,0.0), (lum-0.5) *4.0);
-                    return mix(vec3(1.0,0.6,0.0), vec3(1.0,1.0,0.8), (lum-0.75)*4.0);
-  }
-  if (pal == 3) return mix(vec3(0.0), vec3(0.04, 0.98, 0.90), lum);  // oscilloscope cyan
-  if (pal == 4) return mix(vec3(0.0), vec3(1.0, 0.8, 0.5),   lum);   // sepia
-  if (pal == 5) {                                                       // rainbow
-    float h = lum * 6.0;
-    float x = lum * (1.0 - abs(mod(h, 2.0) - 1.0));
-    if (h < 1.0) return vec3(lum, x,   0.0);
-    if (h < 2.0) return vec3(x,   lum, 0.0);
-    if (h < 3.0) return vec3(0.0, lum, x  );
-    if (h < 4.0) return vec3(0.0, x,   lum);
-    if (h < 5.0) return vec3(x,   0.0, lum);
-                 return vec3(lum, 0.0, x  );
-  }
-  return col;
+// Rotate hue by angle (radians) — rotates around the (1,1,1) axis in RGB space
+vec3 hueRotate(vec3 col, float angle) {
+  float c = cos(angle), s = sin(angle);
+  float k = 1.0 / 3.0, sq = 0.57735027;
+  return clamp(vec3(
+    col.r*(k+(1.0-k)*c) + col.g*(k*(1.0-c)-sq*s) + col.b*(k*(1.0-c)+sq*s),
+    col.r*(k*(1.0-c)+sq*s) + col.g*(k+(1.0-k)*c) + col.b*(k*(1.0-c)-sq*s),
+    col.r*(k*(1.0-c)-sq*s) + col.g*(k*(1.0-c)+sq*s) + col.b*(k+(1.0-k)*c)
+  ), 0.0, 1.0);
 }
 
 void main() {
+  if (v_alpha < 0.05) discard;  // skip fully-transparent pixels — no depth write, no occlusion
   float sint  = clamp(v_tubeT, -1.0, 1.0);
   vec3 N = vec3(0.0, sint, sqrt(max(0.0, 1.0 - sint*sint)));
   vec3 L = normalize(vec3(0.3, 0.7, 1.0));
@@ -250,9 +236,8 @@ void main() {
   float surf_spec = pow(max(0.0, dot(reflect(-Ls, surfN), vec3(0.0, 0.0, 1.0))), 16.0);
   float surf_shade = clamp(0.15 + surf_diff * 0.75 + surf_spec * 0.30, 0.0, 2.5);
   lit = mix(lit, lit * surf_shade, u_lightAmt);
-  // color palette
-  vec3 palCol = applyPalette(lit, u_palette);
-  fragColor = vec4(clamp(mix(lit, palCol, u_paletteAmt), 0.0, 1.0), 1.0);
+  lit = hueRotate(lit, u_hueShift);
+  fragColor = vec4(clamp(lit, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -661,8 +646,8 @@ function setup() {
   contactSlider    = select("#contactSlider");
   fogSlider        = select("#fogSlider");
   bloomSlider      = select("#bloomSlider");
-  paletteSelect    = select("#paletteSelect");
-  paletteAmtSlider = select("#paletteAmtSlider");
+  hueShiftSlider   = select("#hueShiftSlider");
+  lfoHueShift      = select("#lfoHueShift");
   scanModeSelect   = select("#scanModeSelect");
   temporalSlider   = select("#temporalSlider");
   depthSmoothSlider = select("#depthSmoothSlider");
@@ -710,14 +695,6 @@ function setup() {
   window.addEventListener('mouseup',  () => { vidScrubbing = false; });
   window.addEventListener('touchend', () => { vidScrubbing = false; });
   vidTimeLabel = select("#vidTimeLabel");
-
-  currentFrameForExportInput = select("#currentFrameForExportInput");
-  totalFramesForExportInput  = select("#totalFramesForExportInput");
-  startExportBtn = select("#startExportBtn");
-  startExportBtn.mousePressed(startExport);
-  nextFrameBtn = select("#nextFrameBtn");
-  nextFrameBtn.mousePressed(goToNextFrame);
-  currentFrameLabel = select("#currentFrameLabel");
 
   const controlsDiv = select("#controls");
   controlsDiv.mouseOver(() => controlsHovering = true);
@@ -815,8 +792,6 @@ function setup() {
 
   if (navigator.requestMIDIAccess) navigator.requestMIDIAccess().then(onMIDISuccess);
 
-  currentFrameLabel.html(currentFrameForExport);
-
   requestAnimationFrame(renderLoop);
 }
 
@@ -890,9 +865,7 @@ function renderLoop() {
   const lfoFreq = Number(lfoFreqSlider.value());
   const lfoAmp  = Number(lfoAmpSlider.value());
   const lfoType = lfoTypeSelector.value();
-  const lfo = exportMode
-    ? getLFOValueForExport(lfoType, currentFrameForExport, totalFramesForExport)
-    : getLFOValue(lfoType, lfoFreq);
+  const lfo = getLFOValue(lfoType, lfoFreq);
 
   const depth  = baseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
   const tiltX  = baseTiltX + (lfoTiltX.checked() ? lfo * Math.PI * lfoAmp : 0);
@@ -917,8 +890,7 @@ function renderLoop() {
   const contact       = Number(contactSlider.value());
   const fog           = Number(fogSlider.value());
   const bloomAmt      = Number(bloomSlider.value());
-  const paletteIdx    = Number(paletteSelect.value());
-  const paletteAmt    = Number(paletteAmtSlider.value());
+  const hueShift      = Number(hueShiftSlider.value()) + (lfoHueShift.checked() ? lfo * 180 * lfoAmp : 0);
   const scanMode      = scanModeSelect.value(); // 'H', 'V', or 'X'
   const temporal      = Number(temporalSlider.value());
   const depthSmooth   = Number(depthSmoothSlider.value()); // 0-20 pixel radius
@@ -955,7 +927,7 @@ function renderLoop() {
   select("#contactLabel").html(contact.toFixed(2));
   select("#fogLabel").html(fog.toFixed(2));
   select("#bloomLabel").html(bloomAmt.toFixed(2));
-  select("#paletteAmtLabel").html(paletteAmt.toFixed(2));
+  select("#hueShiftLabel").html(Math.round(hueShift) + '\u00B0');
   select("#temporalLabel").html(temporal.toFixed(2));
   select("#depthSmoothLabel").html(depthSmooth.toFixed(1));
   select("#horizAmpLabel").html(horizAmp.toFixed(1));
@@ -974,14 +946,11 @@ function renderLoop() {
   const srcW = src.width, srcH = src.height;
 
   // Render at actual display pixels to eliminate Moiré from browser downscaling.
-  // Export mode always uses full 4K for high-res frames.
   {
     const gpuCanvas = window._gpuCanvas;
     const dpr     = window.devicePixelRatio || 1;
     const dispW   = gpuCanvas.clientWidth || 1280;
-    const targetW = exportMode
-      ? 3840
-      : Math.min(3840, Math.max(320, Math.round(dispW * dpr)));
+    const targetW = Math.min(3840, Math.max(320, Math.round(dispW * dpr)));
     const targetH = Math.round(targetW * 9 / 16);
     if (gpuCanvas.width !== targetW || gpuCanvas.height !== targetH) {
       gpuCanvas.width  = targetW;
@@ -1125,8 +1094,7 @@ function renderLoop() {
   gl2.uniform1f(ul('u_rowStep'),             step / srcH);
   gl2.uniform1f(ul('u_colStep'),             step / srcW);
   gl2.uniform1f(ul('u_fog'),                 fog);
-  gl2.uniform1i(ul('u_palette'),             paletteIdx);
-  gl2.uniform1f(ul('u_paletteAmt'),          paletteAmt);
+  gl2.uniform1f(ul('u_hueShift'),            hueShift * Math.PI / 180.0);
   gl2.uniformMatrix3fv(ul('u_normalMat'),    false, normalMat3);
   gl2.uniform1f(ul('u_normalScale'),         normalScale);
   gl2.uniform1f(ul('u_lightAmt'),            lightAmt);
@@ -1238,17 +1206,6 @@ function getLFOValue(type, freq) {
   }
 }
 
-function getLFOValueForExport(type, frame, total) {
-  if (total <= 0) return 0;
-  const phase = (frame % total) / total;
-  switch (type) {
-    case 'saw': return phase * 2.0 - 1.0;
-    case 'sin': return Math.sin(Math.PI * 2 * phase);
-    case 'tri': return Math.abs(phase * 4 - 2) - 1;
-    default: return 0;
-  }
-}
-
 // --- Camera / media ----------------------------------------------------------
 function startCam(deviceId) {
   uploadedMedia = null; uploadedType = null; currentSourceReady = false;
@@ -1333,7 +1290,7 @@ function resetParams() {
     ['#contactSlider',    '0'],
     ['#fogSlider',        '0'],
     ['#bloomSlider',      '0'],
-    ['#paletteAmtSlider', '0'],
+    ['#hueShiftSlider',   '0'],
     ['#depthSmoothSlider','0'],
     ['#temporalSlider',   '1'],
     ['#shapeXSlider',     '0'],
@@ -1353,12 +1310,11 @@ function resetParams() {
     ['#lineWidthSlider',  '0.48'],
   ];
   defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
-  document.querySelector('#paletteSelect').value  = '0';
   document.querySelector('#scanModeSelect').value = 'H';
   document.querySelector('#lfoType').value        = 'saw';
   ['#lfoDepth','#lfoTiltX','#lfoTiltY','#lfoScale',
    '#lfoShapeX','#lfoShapeY','#lfoWaveAmp','#lfoWaveFreq',
-   '#lfoHorizAmp','#lfoVertAmp','#lfoOffsetX','#lfoOffsetY']
+   '#lfoHorizAmp','#lfoVertAmp','#lfoOffsetX','#lfoOffsetY','#lfoHueShift']
     .forEach(sel => { document.querySelector(sel).checked = false; });
 }
 
@@ -1422,39 +1378,9 @@ function saveImage() {
   const canvas = window._gpuCanvas;
   if (!canvas) return;
   const a = document.createElement('a');
-  a.download = exportMode
-    ? 'rutt-etra-frame-' + String(currentFrameForExport).padStart(4, '0') + '.png'
-    : 'rutt-etra-output.png';
+  a.download = 'rutt-etra-output.png';
   a.href = canvas.toDataURL('image/png');
   a.click();
-}
-
-function startExport() {
-  if (!currentSourceReady) { console.warn('Source not ready.'); return; }
-  totalFramesForExport = Number(totalFramesForExportInput.value());
-  if (totalFramesForExport <= 0) { console.error('Total frames must be > 0.'); return; }
-  exportMode = true;
-  currentFrameForExport = 0;
-  currentFrameForExportInput.value(0);
-  currentFrameLabel.html(0);
-}
-
-function goToNextFrame() {
-  if (!exportMode) { console.warn('Start export first.'); return; }
-  if (currentFrameForExport < totalFramesForExport - 1) {
-    currentFrameForExport++;
-    currentFrameForExportInput.value(currentFrameForExport);
-    currentFrameLabel.html(currentFrameForExport);
-  } else {
-    resetExport();
-  }
-}
-
-function resetExport() {
-  exportMode = false;
-  currentFrameForExport = 0;
-  currentFrameForExportInput.value(0);
-  currentFrameLabel.html(0);
 }
 
 // --- MIDI --------------------------------------------------------------------
