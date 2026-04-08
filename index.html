@@ -9,65 +9,73 @@
       background: #000;
       color: #fff;
       font-family: sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
     }
-    canvas {
-      display: block;
-      margin: 0 auto;
-    }
+    canvas { display: block; }
+    main { width: 100vw; height: 100vh; overflow: hidden; }
+
+    /* ── Overlay panel ─────────────────────────────────────────────── */
     #controls {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-top: 10px;
-      max-width: 1280px;
-      width: 98vw;
+      position: fixed;
+      top: 0; right: 0;
+      width: 270px;
+      height: 100vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: rgba(0,0,0,0.88);
+      padding: 10px 12px 24px;
+      box-sizing: border-box;
+      z-index: 100;
+      transition: transform 0.22s ease;
+      font-size: 12px;
+      scrollbar-width: thin;
+      scrollbar-color: #444 transparent;
     }
-    #row1, #row2 {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 20px;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 15px;
-      border-radius: 8px;
+    #controls.hidden { transform: translateX(274px); }
+    #controls::-webkit-scrollbar { width: 4px; }
+    #controls::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+    .ctrl-section {
+      border-top: 1px solid #333;
+      margin: 10px 0 6px;
+      padding-top: 5px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #666;
     }
     .control-group {
       display: flex;
       flex-direction: column;
-      min-width: 150px;
-      max-width: 220px;
+      margin-bottom: 7px;
     }
-    label {
-      margin-bottom: 4px;
-    }
-    input[type="range"],
-    select,
-    input[type="color"],
-    input[type="file"] {
+    .control-group label { margin-bottom: 2px; color: #ccc; }
+    .control-group label.sub { color: #888; font-size: 11px; margin-top: 3px; }
+    input[type="range"] { width: 100%; accent-color: #0af; cursor: pointer; }
+    select {
       width: 100%;
+      background: #222; color: #fff;
+      border: 1px solid #444; border-radius: 3px;
+      padding: 3px 4px;
     }
     input[type="file"] {
-      background: #222;
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      padding: 4px;
+      background: #222; color: #aaa;
+      border: 1px solid #444; border-radius: 3px;
+      padding: 3px; width: 100%; font-size: 11px;
     }
     button {
-      background: #333;
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      padding: 8px 16px;
-      cursor: pointer;
-      font-size: 1em;
-      margin-top: 6px;
+      background: #2a2a2a; color: #fff;
+      border: 1px solid #444; border-radius: 3px;
+      padding: 5px 10px; cursor: pointer;
+      font-size: 12px; margin-top: 4px; width: 100%;
     }
-    button:hover {
-      background: #666;
+    button:hover { background: #444; }
+    .row2col { display: flex; gap: 6px; }
+    .row2col button { flex: 1; }
+    #_toggleHint {
+      position: fixed; bottom: 10px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px; color: #444;
+      pointer-events: none; z-index: 99;
     }
   </style>
 </head>
@@ -75,221 +83,241 @@
   <main></main>
 
   <div id="controls">
-    <div id="row1">
-      <div class="control-group">
-        <label for="camSelect">Camera Source</label>
-        <select id="camSelect"></select>
-      </div>
 
-      <div class="control-group">
-        <label>Depth Range <span id="depthLabel">0</span></label>
-        <input type="range" id="depthSlider" min="-300" max="300" value="0">
-        <label><input type="checkbox" id="lfoDepth"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label>Tilt Angle X <span id="tiltXLabel">0°</span></label>
-        <input type="range" id="tiltXSlider" min="-180" max="180" value="0">
-        <label><input type="checkbox" id="lfoTiltX"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label>Tilt Angle Y <span id="tiltYLabel">0°</span></label>
-        <input type="range" id="tiltYSlider" min="-180" max="180" value="0">
-        <label><input type="checkbox" id="lfoTiltY"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label>Scale <span id="scaleLabel">1.00</span></label>
-        <input type="range" id="scaleSlider" min="0.5" max="3" step="0.1" value="1">
-        <label><input type="checkbox" id="lfoScale"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label>Density <span id="densityLabel">6</span></label>
-        <input type="range" id="densitySlider" min="2" max="40" value="6">
-      </div>
-
-      <div class="control-group">
-        <label for="lineWidthSlider">Line Width: <span id="lineWidthLabel">0.48</span></label>
-        <input type="range" id="lineWidthSlider" min="0.05" max="1" value="0.48" step="0.01">
-      </div>
-
-      <div class="control-group">
-        <label for="gammaSlider">Gamma: <span id="gammaLabel">2.2</span></label>
-        <input type="range" id="gammaSlider" min="0.1" max="5" value="2.2" step="0.1">
-      </div>
-
-      <div class="control-group">
-        <label for="chromaSlider">Chroma Shift: <span id="chromaLabel">0.000</span></label>
-        <input type="range" id="chromaSlider" min="0" max="0.05" value="0" step="0.001">
-      </div>
-
-      <div class="control-group">
-        <label for="sheenSlider">3D Sheen: <span id="sheenLabel">0.00</span></label>
-        <input type="range" id="sheenSlider" min="0" max="1.5" value="0" step="0.01">
-      </div>
-
-      <div class="control-group">
-        <label for="contactSlider">Contact Shadow: <span id="contactLabel">0.00</span></label>
-        <input type="range" id="contactSlider" min="0" max="1" value="0" step="0.01">
-      </div>
-
-      <div class="control-group">
-        <label for="fogSlider">Depth Fog: <span id="fogLabel">0.00</span></label>
-        <input type="range" id="fogSlider" min="0" max="1" value="0" step="0.01">
-      </div>
-
-      <div class="control-group">
-        <label for="bloomSlider">Bloom: <span id="bloomLabel">0.00</span></label>
-        <input type="range" id="bloomSlider" min="0" max="1.5" value="0" step="0.01">
-      </div>
-
-      <div class="control-group">
-        <label for="hueShiftSlider">Hue Shift: <span id="hueShiftLabel">0°</span></label>
-        <input type="range" id="hueShiftSlider" min="-180" max="180" value="0" step="1">
-        <label><input type="checkbox" id="lfoHueShift"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label for="scanModeSelect">Scan Mode:</label>
-        <select id="scanModeSelect">
-          <option value="H">Horizontal</option>
-          <option value="V">Vertical</option>
-          <option value="X">Both (Grid)</option>
-        </select>
-      </div>
-
-      <div class="control-group">
-        <label for="depthSmoothSlider">Depth Smooth: <span id="depthSmoothLabel">0</span></label>
-        <input type="range" id="depthSmoothSlider" min="0" max="2" value="0" step="0.1">
-      </div>
-
-      <div class="control-group">
-        <label for="temporalSlider">Temporal Smooth: <span id="temporalLabel">1.00</span></label>
-        <input type="range" id="temporalSlider" min="0.01" max="1" value="1" step="0.01">
-      </div>
-      <div class="control-group">
-        <label for="shapeXSlider">Sphere H: <span id="shapeXLabel">0</span></label>
-        <input type="range" id="shapeXSlider" min="-100" max="100" value="0" step="1">
-        <label><input type="checkbox" id="lfoShapeX"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label for="shapeYSlider">Sphere V: <span id="shapeYLabel">0</span></label>
-        <input type="range" id="shapeYSlider" min="-100" max="100" value="0" step="1">
-        <label><input type="checkbox" id="lfoShapeY"> LFO</label>
-      </div>
-
-      <div class="control-group">
-          <label for="waveAmpSlider">Wave Amplitude: <span id="waveAmpLabel">0.0</span></label>
-          <input type="range" id="waveAmpSlider" min="-200" max="200" value="0" step="1">
-          <label><input type="checkbox" id="lfoWaveAmp"> LFO</label>
-      </div>
-      <div class="control-group">
-          <label for="waveFreqSlider">Wave Frequency: <span id="waveFreqLabel">0.0</span></label>
-          <input type="range" id="waveFreqSlider" min="0" max="20" value="0" step="0.1">
-          <label><input type="checkbox" id="lfoWaveFreq"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label for="horizAmpSlider">Horizontal Amp: <span id="horizAmpLabel">1.0</span></label>
-        <input type="range" id="horizAmpSlider" min="0" max="2" value="1" step="0.01">
-        <label><input type="checkbox" id="lfoHorizAmp"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label for="vertAmpSlider">Vertical Amp: <span id="vertAmpLabel">1.0</span></label>
-        <input type="range" id="vertAmpSlider" min="0" max="2" value="1" step="0.01">
-        <label><input type="checkbox" id="lfoVertAmp"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label for="offsetXSlider">Offset X: <span id="offsetXLabel">0</span></label>
-        <input type="range" id="offsetXSlider" min="-300" max="300" value="0" step="1">
-        <label><input type="checkbox" id="lfoOffsetX"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label for="offsetYSlider">Offset Y: <span id="offsetYLabel">0</span></label>
-        <input type="range" id="offsetYSlider" min="-300" max="300" value="0" step="1">
-        <label><input type="checkbox" id="lfoOffsetY"> LFO</label>
-      </div>
-
-      <div class="control-group">
-        <label for="fovSlider">Perspective FOV: <span id="fovLabel">0°</span></label>
-        <input type="range" id="fovSlider" min="0" max="90" value="0" step="1">
-      </div>
-
-      <div class="control-group">
-        <label for="lightAmtSlider">Surface Light: <span id="lightAmtLabel">0.00</span></label>
-        <input type="range" id="lightAmtSlider" min="0" max="1" value="0" step="0.01">
-        <label for="lightAzSlider">Azimuth: <span id="lightAzLabel">45°</span></label>
-        <input type="range" id="lightAzSlider" min="-180" max="180" value="45" step="1">
-        <label for="lightElSlider">Elevation: <span id="lightElLabel">45°</span></label>
-        <input type="range" id="lightElSlider" min="0" max="90" value="45" step="1">
-      </div>
-
+    <!-- SOURCE -->
+    <div class="ctrl-section">Source</div>
+    <div class="control-group">
+      <label for="camSelect">Camera</label>
+      <select id="camSelect"></select>
+    </div>
+    <div class="control-group">
+      <label>Upload Media</label>
+      <input type="file" id="mediaInput" accept="image/*,video/*">
+    </div>
+    <div class="control-group" id="videoControls" style="display:none">
+      <button id="vidPlayPauseBtn">&#9658;</button>
+      <label><input type="checkbox" id="vidLoopChk" checked> Loop</label>
+      <span id="vidTimeLabel" style="font-size:11px">0:00 / 0:00</span>
+    </div>
+    <div class="control-group" id="videoScrubGroup" style="display:none">
+      <input type="range" id="vidScrubber" min="0" max="1000" value="0" step="1">
     </div>
 
-    <div id="row2">
-      <div class="control-group">
-        <label>LFO Type</label>
-        <select id="lfoType">
-          <option value="saw">Sawtooth</option>
-          <option value="sin">Sine</option>
-          <option value="tri">Triangle</option>
-        </select>
-      </div>
-
-      <div class="control-group">
-        <label>LFO Freq</label>
-        <input type="range" id="lfoFreq" min="0.01" max="2" step="0.01" value="0.3">
-      </div>
-
-      <div class="control-group">
-        <label>LFO Amp</label>
-        <input type="range" id="lfoAmp" min="0" max="1" step="0.01" value="0.5">
-      </div>
-
-      <div class="control-group">
-        <label>Upload Media</label>
-        <input type="file" id="mediaInput" accept="image/*,video/*">
-      </div>
-      <div class="control-group" id="videoControls" style="display:none">
-        <button id="vidPlayPauseBtn">⏸</button>
-        <label><input type="checkbox" id="vidLoopChk" checked> Loop</label>
-        <span id="vidTimeLabel" style="font-size:0.85em;min-width:7ch">0:00 / 0:00</span>
-      </div>
-      <div class="control-group" id="videoScrubGroup" style="display:none">
-        <input type="range" id="vidScrubber" min="0" max="1000" value="0" step="1" style="width:100%">
-      </div>
-      <div class="control-group">
-        <button id="resetParamsBtn">Reset Params</button>
-        <button id="downloadBtn">Download Image</button>
-      </div>
-
-      <input type="hidden" id="currentFrameForExportInput" value="0">
-
+    <!-- GEOMETRY -->
+    <div class="ctrl-section">Geometry</div>
+    <div class="control-group">
+      <label>Depth <span id="depthLabel">0</span></label>
+      <input type="range" id="depthSlider" min="-300" max="300" value="0">
+      <label class="sub"><input type="checkbox" id="lfoDepth"> LFO</label>
     </div>
+    <div class="control-group">
+      <label>Depth Floor <span id="depthMinLabel">0%</span></label>
+      <input type="range" id="depthMinSlider" min="0" max="100" value="0" step="1">
+    </div>
+    <div class="control-group">
+      <label>Depth Ceiling <span id="depthMaxLabel">100%</span></label>
+      <input type="range" id="depthMaxSlider" min="0" max="100" value="100" step="1">
+    </div>
+    <div class="control-group">
+      <label><input type="checkbox" id="invertDepthChk"> Invert Depth</label>
+    </div>
+    <div class="control-group">
+      <label>Tilt X <span id="tiltXLabel">0°</span></label>
+      <input type="range" id="tiltXSlider" min="-180" max="180" value="0">
+      <label class="sub"><input type="checkbox" id="lfoTiltX"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Tilt Y <span id="tiltYLabel">0°</span></label>
+      <input type="range" id="tiltYSlider" min="-180" max="180" value="0">
+      <label class="sub"><input type="checkbox" id="lfoTiltY"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Scale <span id="scaleLabel">1.00</span></label>
+      <input type="range" id="scaleSlider" min="0.5" max="3" step="0.1" value="1">
+      <label class="sub"><input type="checkbox" id="lfoScale"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Density <span id="densityLabel">6</span></label>
+      <input type="range" id="densitySlider" min="2" max="40" value="6">
+    </div>
+    <div class="control-group">
+      <label>Line Width <span id="lineWidthLabel">0.48</span></label>
+      <input type="range" id="lineWidthSlider" min="0.05" max="1" value="0.48" step="0.01">
+    </div>
+    <div class="control-group">
+      <label>Scan Mode</label>
+      <select id="scanModeSelect">
+        <option value="H">Horizontal</option>
+        <option value="V">Vertical</option>
+        <option value="X">Both (Grid)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Perspective FOV <span id="fovLabel">0°</span></label>
+      <input type="range" id="fovSlider" min="0" max="90" value="0" step="1">
+    </div>
+    <div class="control-group">
+      <label>Horiz Amp <span id="horizAmpLabel">1.0</span></label>
+      <input type="range" id="horizAmpSlider" min="0" max="2" value="1" step="0.01">
+      <label class="sub"><input type="checkbox" id="lfoHorizAmp"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Vert Amp <span id="vertAmpLabel">1.0</span></label>
+      <input type="range" id="vertAmpSlider" min="0" max="2" value="1" step="0.01">
+      <label class="sub"><input type="checkbox" id="lfoVertAmp"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Offset X <span id="offsetXLabel">0</span></label>
+      <input type="range" id="offsetXSlider" min="-300" max="300" value="0" step="1">
+      <label class="sub"><input type="checkbox" id="lfoOffsetX"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Offset Y <span id="offsetYLabel">0</span></label>
+      <input type="range" id="offsetYSlider" min="-300" max="300" value="0" step="1">
+      <label class="sub"><input type="checkbox" id="lfoOffsetY"> LFO</label>
+    </div>
+
+    <!-- SHAPE -->
+    <div class="ctrl-section">Shape</div>
+    <div class="control-group">
+      <label>Sphere H <span id="shapeXLabel">0</span></label>
+      <input type="range" id="shapeXSlider" min="-100" max="100" value="0" step="1">
+      <label class="sub"><input type="checkbox" id="lfoShapeX"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Sphere V <span id="shapeYLabel">0</span></label>
+      <input type="range" id="shapeYSlider" min="-100" max="100" value="0" step="1">
+      <label class="sub"><input type="checkbox" id="lfoShapeY"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Wave Amp <span id="waveAmpLabel">0.0</span></label>
+      <input type="range" id="waveAmpSlider" min="-200" max="200" value="0" step="1">
+      <label class="sub"><input type="checkbox" id="lfoWaveAmp"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Wave Freq X <span id="waveFreqXLabel">0.0</span></label>
+      <input type="range" id="waveFreqXSlider" min="0" max="20" value="0" step="0.1">
+      <label class="sub"><input type="checkbox" id="lfoWaveFreqX"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Wave Freq Y <span id="waveFreqYLabel">0.0</span></label>
+      <input type="range" id="waveFreqYSlider" min="0" max="20" value="0" step="0.1">
+      <label class="sub"><input type="checkbox" id="lfoWaveFreqY"> LFO</label>
+    </div>
+
+    <!-- COLOR -->
+    <div class="ctrl-section">Color</div>
+    <div class="control-group">
+      <label>Gamma <span id="gammaLabel">2.2</span></label>
+      <input type="range" id="gammaSlider" min="0.1" max="5" value="2.2" step="0.1">
+    </div>
+    <div class="control-group">
+      <label>Chroma Shift <span id="chromaLabel">0.000</span></label>
+      <input type="range" id="chromaSlider" min="0" max="0.05" value="0" step="0.001">
+    </div>
+    <div class="control-group">
+      <label>Hue Shift <span id="hueShiftLabel">0°</span></label>
+      <input type="range" id="hueShiftSlider" min="-180" max="180" value="0" step="1">
+      <label class="sub"><input type="checkbox" id="lfoHueShift"> LFO</label>
+    </div>
+    <div class="control-group">
+      <label>Saturation <span id="satLabel">1.00</span></label>
+      <input type="range" id="satSlider" min="0" max="2" value="1" step="0.01">
+      <label class="sub"><input type="checkbox" id="lfoSat"> LFO</label>
+    </div>
+
+    <!-- FX -->
+    <div class="ctrl-section">FX</div>
+    <div class="control-group">
+      <label>3D Sheen <span id="sheenLabel">0.00</span></label>
+      <input type="range" id="sheenSlider" min="0" max="1.5" value="0" step="0.01">
+    </div>
+    <div class="control-group">
+      <label>Contact Shadow <span id="contactLabel">0.00</span></label>
+      <input type="range" id="contactSlider" min="0" max="1" value="0" step="0.01">
+    </div>
+    <div class="control-group">
+      <label>Depth Fog <span id="fogLabel">0.00</span></label>
+      <input type="range" id="fogSlider" min="0" max="1" value="0" step="0.01">
+      <label class="sub"><input type="checkbox" id="fogInvertChk"> Invert (darken raised)</label>
+    </div>
+    <div class="control-group">
+      <label>Depth Smooth <span id="depthSmoothLabel">0.0</span></label>
+      <input type="range" id="depthSmoothSlider" min="0" max="2" value="0" step="0.1">
+      <label class="sub"><input type="checkbox" id="colorSmoothChk"> Apply to Color</label>
+    </div>
+    <div class="control-group">
+      <label>Temporal Smooth <span id="temporalLabel">1.00</span></label>
+      <input type="range" id="temporalSlider" min="0.01" max="1" value="1" step="0.01">
+    </div>
+    <div class="control-group">
+      <label>Bloom <span id="bloomLabel">0.00</span></label>
+      <input type="range" id="bloomSlider" min="0" max="1.5" value="0" step="0.01">
+    </div>
+    <div class="control-group">
+      <label>Surface Light <span id="lightAmtLabel">0.00</span></label>
+      <input type="range" id="lightAmtSlider" min="0" max="1" value="0" step="0.01">
+      <label class="sub">Azimuth <span id="lightAzLabel">45°</span></label>
+      <input type="range" id="lightAzSlider" min="-180" max="180" value="45" step="1">
+      <label class="sub">Elevation <span id="lightElLabel">45°</span></label>
+      <input type="range" id="lightElSlider" min="0" max="90" value="45" step="1">
+    </div>
+
+    <!-- LFO -->
+    <div class="ctrl-section">LFO</div>
+    <div class="control-group">
+      <label>Type</label>
+      <select id="lfoType">
+        <option value="saw">Sawtooth</option>
+        <option value="sin">Sine</option>
+        <option value="tri">Triangle</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Frequency</label>
+      <input type="range" id="lfoFreq" min="0.01" max="2" step="0.01" value="0.3">
+    </div>
+    <div class="control-group">
+      <label>Amplitude</label>
+      <input type="range" id="lfoAmp" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+      <label>Phase Offset <span id="lfoPhaseOffsetLabel">0°</span></label>
+      <input type="range" id="lfoPhaseOffsetSlider" min="0" max="360" value="0" step="1">
+    </div>
+
+    <!-- UTILITY -->
+    <div class="ctrl-section">Utility</div>
+    <div class="control-group row2col">
+      <button id="resetParamsBtn">Reset</button>
+      <button id="downloadBtn">Download</button>
+    </div>
+
+    <input type="hidden" id="currentFrameForExportInput" value="0">
   </div>
+
+  <div id="_toggleHint">Shift+Enter — toggle controls</div>
 
   <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="sketch.js"></script>
   <script>
-    // Double-click a slider's label to reset it to its default value.
+    // Shift+Enter toggles the overlay panel
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && e.shiftKey) {
+        document.getElementById('controls').classList.toggle('hidden');
+        e.preventDefault();
+      }
+    });
+
+    // Double-click a slider label to reset to default
     document.querySelectorAll('input[type="range"]').forEach(slider => {
       const def = slider.defaultValue;
-      // Find label via for= attribute, or walk back through siblings
       let label = slider.id ? document.querySelector('label[for="' + slider.id + '"]') : null;
       if (!label) {
         let el = slider.previousElementSibling;
-        while (el) {
-          if (el.tagName === 'LABEL') { label = el; break; }
-          el = el.previousElementSibling;
-        }
+        while (el) { if (el.tagName === 'LABEL') { label = el; break; } el = el.previousElementSibling; }
       }
       if (label) {
         label.style.cursor = 'pointer';

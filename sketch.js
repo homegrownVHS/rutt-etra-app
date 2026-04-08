@@ -9,9 +9,9 @@ let depthSlider, tiltXSlider, tiltYSlider, scaleSlider, densitySlider;
 let camSelect, mediaInput;
 
 let lfoDepth, lfoTiltX, lfoTiltY, lfoScale, lfoFreqSlider, lfoAmpSlider, lfoTypeSelector;
-let lfoShapeX, lfoShapeY, lfoWaveAmp, lfoWaveFreq;
+let lfoShapeX, lfoShapeY, lfoWaveAmp, lfoWaveFreqX, lfoWaveFreqY;
 let shapeXSlider, shapeYSlider;
-let waveAmpSlider, waveFreqSlider;
+let waveAmpSlider, waveFreqXSlider, waveFreqYSlider;
 let gammaSlider, gammaLabel;
 let horizAmpSlider, vertAmpSlider;
 let lfoHorizAmp, lfoVertAmp;
@@ -19,7 +19,9 @@ let offsetXSlider, offsetYSlider;
 let lfoOffsetX, lfoOffsetY;
 
 // --- FX globals --------------------------------------------------------------
-let chromaSlider, sheenSlider, contactSlider, fogSlider, bloomSlider, hueShiftSlider, lfoHueShift, scanModeSelect, temporalSlider, depthSmoothSlider;
+let chromaSlider, sheenSlider, contactSlider, fogSlider, fogInvertChk, bloomSlider, hueShiftSlider, lfoHueShift, satSlider, lfoSat, scanModeSelect, temporalSlider, depthSmoothSlider, colorSmoothChk;
+let depthMinSlider, depthMaxSlider, invertDepthChk;
+let lfoPhaseOffsetSlider;
 let fovSlider, lightAmtSlider, lightAzSlider, lightElSlider;
 let lineWidthSlider;
 
@@ -58,7 +60,8 @@ uniform float u_gamma;
 uniform float u_shapeX;
 uniform float u_shapeY;
 uniform float u_waveAmp;
-uniform float u_waveFreq;
+uniform float u_waveFreqX;
+uniform float u_waveFreqY;
 uniform float u_chromaShift;
 uniform float u_tubeWidth;
 uniform float u_rowStep;       // one scanline step in UV-Y space
@@ -66,8 +69,13 @@ uniform float u_colStep;       // one column step in UV-X space (for vertical sc
 uniform float u_contactShadow; // 0=off, 1=full occlusion
 uniform float u_tubeAxis;      // 0=horizontal (Y offset), 1=vertical (X offset)
 uniform float u_fog;           // depth fog: darkens sunken lines
+uniform int   u_fogInvert;     // 1 = invert fog direction (darken raised instead)
 uniform mat3  u_normalMat;     // rotation-only matrix for surface normal transform
 uniform float u_normalScale;   // depth-to-spatial scale for gradient steepness
+uniform float u_depthMin;      // depth input floor  (0-1)
+uniform float u_depthMax;      // depth input ceiling (0-1)
+uniform int   u_invertDepth;   // 1 = flip bright/dark driving z
+uniform int   u_colorSmooth;   // 1 = pull colour from blurred depthTex
 
 in float a_tubeT;
 
@@ -92,15 +100,22 @@ void main() {
 
   // Chromatic aberration: split R and B channels laterally
   float cs = u_chromaShift;
-  float r = texture(u_tex, vec2(clamp(a_uv.x - cs, 0.0, 1.0), a_uv.y)).r;
+  // Color source: raw tex or spatially-blurred depthTex when colorSmooth is on
+  float csmooth = float(u_colorSmooth);
   vec4 texC = texture(u_tex, a_uv);
-  float g = texC.g;
-  float b = texture(u_tex, vec2(clamp(a_uv.x + cs, 0.0, 1.0), a_uv.y)).b;
   float texAlpha = texC.a;
+  float r = mix(texture(u_tex,      vec2(clamp(a_uv.x - cs, 0.0, 1.0), a_uv.y)).r,
+                texture(u_depthTex, vec2(clamp(a_uv.x - cs, 0.0, 1.0), a_uv.y)).r, csmooth);
+  float g = mix(texC.g, texture(u_depthTex, a_uv).g, csmooth);
+  float b = mix(texture(u_tex,      vec2(clamp(a_uv.x + cs, 0.0, 1.0), a_uv.y)).b,
+                texture(u_depthTex, vec2(clamp(a_uv.x + cs, 0.0, 1.0), a_uv.y)).b, csmooth);
 
-  float bright = (r + g + b) / 3.0;
+  // Depth: remap input range then optionally invert
   vec3 ds = texture(u_depthTex, a_uv).rgb;
-  float brightDepth = mix(0.5, (ds.r + ds.g + ds.b) / 3.0, texAlpha);
+  float rawDepth = (ds.r + ds.g + ds.b) / 3.0;
+  float remapped = clamp((rawDepth - u_depthMin) / max(u_depthMax - u_depthMin, 0.001), 0.0, 1.0);
+  if (u_invertDepth == 1) remapped = 1.0 - remapped;
+  float brightDepth = mix(0.5, remapped, texAlpha);
   float gammaBright = applyGamma(brightDepth, u_gamma);
 
   v_alpha = texAlpha;
@@ -139,8 +154,8 @@ void main() {
 
   float scaleWaveX = u_waveAmp * (sz.x / 640.0);
   float scaleWaveY = u_waveAmp * (sz.y / 480.0);
-  float waveX = scaleWaveX * sin(ny * PI * 2.0 * u_waveFreq);
-  float waveY = scaleWaveY * sin(nx * PI * 2.0 * u_waveFreq);
+  float waveX = scaleWaveX * sin(ny * PI * 2.0 * u_waveFreqX);
+  float waveY = scaleWaveY * sin(nx * PI * 2.0 * u_waveFreqY);
 
   // --- Sphere wrap ---------------------------------------------------------
   // lon = longitude (-π..+π across width  when shapeX=1)
@@ -201,6 +216,8 @@ in vec3  v_surfNormal;
 in float v_alpha;
 uniform float u_sheen;
 uniform float u_fog;
+uniform int   u_fogInvert;
+uniform float u_saturation;
 uniform float u_hueShift;  // hue rotation in radians
 uniform float u_lightAmt;
 uniform float u_lightAz;
@@ -227,8 +244,9 @@ void main() {
   float spec    = pow(max(0.0, N.z), 32.0);
   float shade   = mix(1.0, 0.50 + diffuse * 0.46 + spec * 0.30, clamp(u_sheen, 0.0, 1.0));
   vec3 lit = v_color.rgb * shade * v_shadow;
-  // depth fog: dark/sunken lines fade fully to black
-  lit *= (1.0 - u_fog * (1.0 - v_z));
+  // depth fog: sunken or raised lines fade to black depending on fogInvert
+  float fogFactor = u_fogInvert == 1 ? v_z : (1.0 - v_z);
+  lit *= (1.0 - u_fog * fogFactor);
   // Surface normal lighting
   vec3 Ls = normalize(vec3(cos(u_lightEl)*sin(u_lightAz), cos(u_lightEl)*cos(u_lightAz), sin(u_lightEl)));
   vec3 surfN = normalize(v_surfNormal);
@@ -237,6 +255,9 @@ void main() {
   float surf_shade = clamp(0.15 + surf_diff * 0.75 + surf_spec * 0.30, 0.0, 2.5);
   lit = mix(lit, lit * surf_shade, u_lightAmt);
   lit = hueRotate(lit, u_hueShift);
+  // Saturation: 0=greyscale, 1=normal, 2=vivid
+  float luma = dot(lit, vec3(0.299, 0.587, 0.114));
+  lit = mix(vec3(luma), lit, u_saturation);
   fragColor = vec4(clamp(lit, 0.0, 1.0), 1.0);
 }
 `;
@@ -631,31 +652,41 @@ function setup() {
   shapeXSlider   = select("#shapeXSlider");
   shapeYSlider   = select("#shapeYSlider");
   waveAmpSlider  = select("#waveAmpSlider");
-  waveFreqSlider = select("#waveFreqSlider");
+  waveFreqXSlider = select("#waveFreqXSlider");
+  waveFreqYSlider = select("#waveFreqYSlider");
 
-  lfoShapeX  = select("#lfoShapeX");
-  lfoShapeY  = select("#lfoShapeY");
-  lfoWaveAmp = select("#lfoWaveAmp");
-  lfoWaveFreq= select("#lfoWaveFreq");
+  lfoShapeX    = select("#lfoShapeX");
+  lfoShapeY    = select("#lfoShapeY");
+  lfoWaveAmp   = select("#lfoWaveAmp");
+  lfoWaveFreqX = select("#lfoWaveFreqX");
+  lfoWaveFreqY = select("#lfoWaveFreqY");
 
   gammaSlider = select("#gammaSlider");
   gammaLabel  = select("#gammaLabel");
 
-  chromaSlider     = select("#chromaSlider");
-  sheenSlider      = select("#sheenSlider");
-  contactSlider    = select("#contactSlider");
-  fogSlider        = select("#fogSlider");
-  bloomSlider      = select("#bloomSlider");
-  hueShiftSlider   = select("#hueShiftSlider");
-  lfoHueShift      = select("#lfoHueShift");
-  scanModeSelect   = select("#scanModeSelect");
-  temporalSlider   = select("#temporalSlider");
+  chromaSlider      = select("#chromaSlider");
+  sheenSlider       = select("#sheenSlider");
+  contactSlider     = select("#contactSlider");
+  fogSlider         = select("#fogSlider");
+  fogInvertChk      = select("#fogInvertChk");
+  bloomSlider       = select("#bloomSlider");
+  hueShiftSlider    = select("#hueShiftSlider");
+  lfoHueShift       = select("#lfoHueShift");
+  satSlider         = select("#satSlider");
+  lfoSat            = select("#lfoSat");
+  depthMinSlider    = select("#depthMinSlider");
+  depthMaxSlider    = select("#depthMaxSlider");
+  invertDepthChk    = select("#invertDepthChk");
+  colorSmoothChk    = select("#colorSmoothChk");
+  lfoPhaseOffsetSlider = select("#lfoPhaseOffsetSlider");
+  scanModeSelect    = select("#scanModeSelect");
+  temporalSlider    = select("#temporalSlider");
   depthSmoothSlider = select("#depthSmoothSlider");
-  fovSlider        = select("#fovSlider");
-  lightAmtSlider   = select("#lightAmtSlider");
-  lightAzSlider    = select("#lightAzSlider");
-  lightElSlider    = select("#lightElSlider");
-  lineWidthSlider  = select("#lineWidthSlider");
+  fovSlider         = select("#fovSlider");
+  lightAmtSlider    = select("#lightAmtSlider");
+  lightAzSlider     = select("#lightAzSlider");
+  lightElSlider     = select("#lightElSlider");
+  lineWidthSlider   = select("#lineWidthSlider");
 
   horizAmpSlider = select("#horizAmpSlider");
   vertAmpSlider  = select("#vertAmpSlider");
@@ -862,21 +893,22 @@ function renderLoop() {
   const baseScale  = Number(scaleSlider.value());
   const step       = Math.max(1, Math.floor(Number(densitySlider.value()) / 2));
 
-  const lfoFreq = Number(lfoFreqSlider.value());
-  const lfoAmp  = Number(lfoAmpSlider.value());
-  const lfoType = lfoTypeSelector.value();
-  const lfo = getLFOValue(lfoType, lfoFreq);
+  const lfoFreq        = Number(lfoFreqSlider.value());
+  const lfoAmp         = Number(lfoAmpSlider.value());
+  const lfoType        = lfoTypeSelector.value();
+  const lfoPhaseOffset = Number(lfoPhaseOffsetSlider.value());
+  const lfo = getLFOValue(lfoType, lfoFreq, lfoPhaseOffset);
 
   const depth  = baseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
   const tiltX  = baseTiltX + (lfoTiltX.checked() ? lfo * Math.PI * lfoAmp : 0);
   const tiltY  = baseTiltY + (lfoTiltY.checked() ? lfo * Math.PI * lfoAmp : 0);
   const scl    = baseScale + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
 
-  // Slider is -100..100; normalise to -1..1 for shader
-  const shapeX   = Math.max(-1, Math.min(1, (Number(shapeXSlider.value()) + (lfoShapeX.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
-  const shapeY   = Math.max(-1, Math.min(1, (Number(shapeYSlider.value()) + (lfoShapeY.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
-  const waveAmp  = Number(waveAmpSlider.value()) + (lfoWaveAmp.checked() ? lfo * 200 * lfoAmp : 0);
-  const waveFreq = Math.max(0, Number(waveFreqSlider.value()) + (lfoWaveFreq.checked() ? lfo * 20 * lfoAmp : 0));
+  const shapeX    = Math.max(-1, Math.min(1, (Number(shapeXSlider.value()) + (lfoShapeX.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
+  const shapeY    = Math.max(-1, Math.min(1, (Number(shapeYSlider.value()) + (lfoShapeY.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
+  const waveAmp   = Number(waveAmpSlider.value()) + (lfoWaveAmp.checked() ? lfo * 200 * lfoAmp : 0);
+  const waveFreqX = Math.max(0, Number(waveFreqXSlider.value()) + (lfoWaveFreqX.checked() ? lfo * 20 * lfoAmp : 0));
+  const waveFreqY = Math.max(0, Number(waveFreqYSlider.value()) + (lfoWaveFreqY.checked() ? lfo * 20 * lfoAmp : 0));
 
   const horizAmp = Math.max(0, Number(horizAmpSlider.value()) + (lfoHorizAmp.checked() ? lfo * 0.5 * lfoAmp : 0));
   const vertAmp  = Math.max(0, Number(vertAmpSlider.value())  + (lfoVertAmp.checked()  ? lfo * 0.5 * lfoAmp : 0));
@@ -884,21 +916,27 @@ function renderLoop() {
   const offsetX  = Number(offsetXSlider.value()) + (lfoOffsetX.checked() ? lfo * 100 * lfoAmp : 0);
   const offsetY  = Number(offsetYSlider.value()) + (lfoOffsetY.checked() ? lfo * 100 * lfoAmp : 0);
 
-  const gamma = Math.max(0.01, Number(gammaSlider.value()));
+  const gamma       = Math.max(0.01, Number(gammaSlider.value()));
   const chromaShift = Number(chromaSlider.value());
-  const sheen         = Number(sheenSlider.value());
-  const contact       = Number(contactSlider.value());
-  const fog           = Number(fogSlider.value());
-  const bloomAmt      = Number(bloomSlider.value());
-  const hueShift      = Number(hueShiftSlider.value()) + (lfoHueShift.checked() ? lfo * 180 * lfoAmp : 0);
-  const scanMode      = scanModeSelect.value(); // 'H', 'V', or 'X'
-  const temporal      = Number(temporalSlider.value());
-  const depthSmooth   = Number(depthSmoothSlider.value()); // 0-20 pixel radius
-  const fovDeg        = Number(fovSlider.value());
-  const lightAmt      = Number(lightAmtSlider.value());
-  const lightAz       = Number(lightAzSlider.value()) * Math.PI / 180.0;
-  const lightEl       = Number(lightElSlider.value()) * Math.PI / 180.0;
-  const lineWidth     = Number(lineWidthSlider.value());
+  const sheen       = Number(sheenSlider.value());
+  const contact     = Number(contactSlider.value());
+  const fog         = Number(fogSlider.value());
+  const fogInvert   = fogInvertChk.elt.checked ? 1 : 0;
+  const bloomAmt    = Number(bloomSlider.value());
+  const hueShift    = Number(hueShiftSlider.value()) + (lfoHueShift.checked() ? lfo * 180 * lfoAmp : 0);
+  const saturation  = Math.max(0, Number(satSlider.value())   + (lfoSat.checked()     ? lfo * 1.0 * lfoAmp : 0));
+  const depthMin    = Number(depthMinSlider.value()) / 100.0;
+  const depthMax    = Number(depthMaxSlider.value()) / 100.0;
+  const invertDepth = invertDepthChk.elt.checked ? 1 : 0;
+  const colorSmooth = colorSmoothChk.elt.checked ? 1 : 0;
+  const scanMode    = scanModeSelect.value();
+  const temporal    = Number(temporalSlider.value());
+  const depthSmooth = Number(depthSmoothSlider.value());
+  const fovDeg      = Number(fovSlider.value());
+  const lightAmt    = Number(lightAmtSlider.value());
+  const lightAz     = Number(lightAzSlider.value()) * Math.PI / 180.0;
+  const lightEl     = Number(lightElSlider.value()) * Math.PI / 180.0;
+  const lineWidth   = Number(lineWidthSlider.value());
 
   // Update video scrubber
   if (uploadedType === 'video' && uploadedMedia) {
@@ -911,7 +949,6 @@ function renderLoop() {
     vidPlayPauseBtn.html(v.paused ? '\u25B6' : '\u23F8');
   }
 
-  // Update labels
   select("#depthLabel").html(depth.toFixed(0));
   select("#tiltXLabel").html(Number(tiltXSlider.value()) + "\u00B0");
   select("#tiltYLabel").html(tiltYSlider.value() + "\u00B0");
@@ -920,7 +957,8 @@ function renderLoop() {
   select("#shapeXLabel").html(Math.round(shapeX * 100));
   select("#shapeYLabel").html(Math.round(shapeY * 100));
   select("#waveAmpLabel").html(waveAmp.toFixed(1));
-  select("#waveFreqLabel").html(waveFreq.toFixed(1));
+  select("#waveFreqXLabel").html(waveFreqX.toFixed(1));
+  select("#waveFreqYLabel").html(waveFreqY.toFixed(1));
   select("#gammaLabel").html(gamma.toFixed(1));
   select("#chromaLabel").html(chromaShift.toFixed(3));
   select("#sheenLabel").html(sheen.toFixed(2));
@@ -928,6 +966,9 @@ function renderLoop() {
   select("#fogLabel").html(fog.toFixed(2));
   select("#bloomLabel").html(bloomAmt.toFixed(2));
   select("#hueShiftLabel").html(Math.round(hueShift) + '\u00B0');
+  select("#satLabel").html(saturation.toFixed(2));
+  select("#depthMinLabel").html(Math.round(depthMin * 100) + '%');
+  select("#depthMaxLabel").html(Math.round(depthMax * 100) + '%');
   select("#temporalLabel").html(temporal.toFixed(2));
   select("#depthSmoothLabel").html(depthSmooth.toFixed(1));
   select("#horizAmpLabel").html(horizAmp.toFixed(1));
@@ -939,6 +980,7 @@ function renderLoop() {
   select("#lightAzLabel").html(Math.round(lightAz * 180 / Math.PI) + '\u00B0');
   select("#lightElLabel").html(Math.round(lightEl * 180 / Math.PI) + '\u00B0');
   select("#lineWidthLabel").html(lineWidth.toFixed(2));
+  select("#lfoPhaseOffsetLabel").html(Math.round(lfoPhaseOffset) + '\u00B0');
   // Smooth rotation
   rotX += (targetRotX - rotX) * 0.1;
   rotY += (targetRotY - rotY) * 0.1;
@@ -1087,14 +1129,21 @@ function renderLoop() {
   gl2.uniform1f(ul('u_shapeX'),              shapeX);
   gl2.uniform1f(ul('u_shapeY'),              shapeY);
   gl2.uniform1f(ul('u_waveAmp'),             waveAmp);
-  gl2.uniform1f(ul('u_waveFreq'),            waveFreq);
+  gl2.uniform1f(ul('u_waveFreqX'),           waveFreqX);
+  gl2.uniform1f(ul('u_waveFreqY'),           waveFreqY);
   gl2.uniform1f(ul('u_chromaShift'),         chromaShift);
   gl2.uniform1f(ul('u_sheen'),               sheen);
   gl2.uniform1f(ul('u_contactShadow'),       contact);
   gl2.uniform1f(ul('u_rowStep'),             step / srcH);
   gl2.uniform1f(ul('u_colStep'),             step / srcW);
   gl2.uniform1f(ul('u_fog'),                 fog);
+  gl2.uniform1i(ul('u_fogInvert'),           fogInvert);
   gl2.uniform1f(ul('u_hueShift'),            hueShift * Math.PI / 180.0);
+  gl2.uniform1f(ul('u_saturation'),          saturation);
+  gl2.uniform1f(ul('u_depthMin'),            depthMin);
+  gl2.uniform1f(ul('u_depthMax'),            depthMax);
+  gl2.uniform1i(ul('u_invertDepth'),         invertDepth);
+  gl2.uniform1i(ul('u_colorSmooth'),         colorSmooth);
   gl2.uniformMatrix3fv(ul('u_normalMat'),    false, normalMat3);
   gl2.uniform1f(ul('u_normalScale'),         normalScale);
   gl2.uniform1f(ul('u_lightAmt'),            lightAmt);
@@ -1195,13 +1244,14 @@ function renderLoop() {
 }
 
 // --- LFO ----------------------------------------------------------------------
-function getLFOValue(type, freq) {
+function getLFOValue(type, freq, phaseOffset) {
   lfoPhase += freq * 0.01;
   if (lfoPhase > 1) lfoPhase -= 1;
+  const p = (lfoPhase + (phaseOffset || 0) / 360.0) % 1.0;
   switch (type) {
-    case 'saw': return lfoPhase * 2.0 - 1.0;
-    case 'sin': return Math.sin(Math.PI * 2 * lfoPhase);
-    case 'tri': return Math.abs(lfoPhase * 4 - 2) - 1;
+    case 'saw': return p * 2.0 - 1.0;
+    case 'sin': return Math.sin(Math.PI * 2 * p);
+    case 'tri': return Math.abs(p * 4 - 2) - 1;
     default: return 0;
   }
 }
@@ -1279,42 +1329,50 @@ function handleImageUpload(file) {
 
 function resetParams() {
   const defaults = [
-    ['#depthSlider',      '0'],
-    ['#tiltXSlider',      '0'],
-    ['#tiltYSlider',      '0'],
-    ['#scaleSlider',      '1'],
-    ['#densitySlider',    '6'],
-    ['#gammaSlider',      '2.2'],
-    ['#chromaSlider',     '0'],
-    ['#sheenSlider',      '0'],
-    ['#contactSlider',    '0'],
-    ['#fogSlider',        '0'],
-    ['#bloomSlider',      '0'],
-    ['#hueShiftSlider',   '0'],
-    ['#depthSmoothSlider','0'],
-    ['#temporalSlider',   '1'],
-    ['#shapeXSlider',     '0'],
-    ['#shapeYSlider',     '0'],
-    ['#waveAmpSlider',    '0'],
-    ['#waveFreqSlider',   '0'],
-    ['#horizAmpSlider',   '1'],
-    ['#vertAmpSlider',    '1'],
-    ['#offsetXSlider',    '0'],
-    ['#offsetYSlider',    '0'],
-    ['#lfoFreq',          '0.3'],
-    ['#lfoAmp',           '0.5'],
-    ['#fovSlider',        '0'],
-    ['#lightAmtSlider',   '0'],
-    ['#lightAzSlider',    '45'],
-    ['#lightElSlider',    '45'],
-    ['#lineWidthSlider',  '0.48'],
+    ['#depthSlider',         '0'],
+    ['#depthMinSlider',      '0'],
+    ['#depthMaxSlider',      '100'],
+    ['#tiltXSlider',         '0'],
+    ['#tiltYSlider',         '0'],
+    ['#scaleSlider',         '1'],
+    ['#densitySlider',       '6'],
+    ['#gammaSlider',         '2.2'],
+    ['#chromaSlider',        '0'],
+    ['#sheenSlider',         '0'],
+    ['#contactSlider',       '0'],
+    ['#fogSlider',           '0'],
+    ['#bloomSlider',         '0'],
+    ['#hueShiftSlider',      '0'],
+    ['#satSlider',           '1'],
+    ['#depthSmoothSlider',   '0'],
+    ['#temporalSlider',      '1'],
+    ['#shapeXSlider',        '0'],
+    ['#shapeYSlider',        '0'],
+    ['#waveAmpSlider',       '0'],
+    ['#waveFreqXSlider',     '0'],
+    ['#waveFreqYSlider',     '0'],
+    ['#horizAmpSlider',      '1'],
+    ['#vertAmpSlider',       '1'],
+    ['#offsetXSlider',       '0'],
+    ['#offsetYSlider',       '0'],
+    ['#lfoFreq',             '0.3'],
+    ['#lfoAmp',              '0.5'],
+    ['#lfoPhaseOffsetSlider','0'],
+    ['#fovSlider',           '0'],
+    ['#lightAmtSlider',      '0'],
+    ['#lightAzSlider',       '45'],
+    ['#lightElSlider',       '45'],
+    ['#lineWidthSlider',     '0.48'],
   ];
   defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
   document.querySelector('#scanModeSelect').value = 'H';
   document.querySelector('#lfoType').value        = 'saw';
+  ['#invertDepthChk','#fogInvertChk','#colorSmoothChk'].forEach(sel => {
+    document.querySelector(sel).checked = false;
+  });
   ['#lfoDepth','#lfoTiltX','#lfoTiltY','#lfoScale',
-   '#lfoShapeX','#lfoShapeY','#lfoWaveAmp','#lfoWaveFreq',
-   '#lfoHorizAmp','#lfoVertAmp','#lfoOffsetX','#lfoOffsetY','#lfoHueShift']
+   '#lfoShapeX','#lfoShapeY','#lfoWaveAmp','#lfoWaveFreqX','#lfoWaveFreqY',
+   '#lfoHorizAmp','#lfoVertAmp','#lfoOffsetX','#lfoOffsetY','#lfoHueShift','#lfoSat']
     .forEach(sel => { document.querySelector(sel).checked = false; });
 }
 
@@ -1395,12 +1453,13 @@ function handleCustomMIDIMessage(message) {
     120:'depthSlider', 121:'tiltXSlider', 122:'tiltYSlider',
     123:'scaleSlider', 124:'densitySlider', 125:'lfoFreq', 126:'lfoAmp',
      40:'shapeXSlider', 41:'shapeYSlider', 42:'waveAmpSlider',
-     43:'waveFreqSlider', 46:'gammaSlider',
+     43:'waveFreqXSlider', 55:'waveFreqYSlider', 46:'gammaSlider',
      47:'horizAmpSlider', 48:'vertAmpSlider',
      51:'offsetXSlider', 52:'offsetYSlider',
      32:'lfoDepth', 33:'lfoTiltX', 34:'lfoTiltY', 35:'lfoScale',
-     38:'lfoShapeX', 39:'lfoShapeY', 44:'lfoWaveAmp', 45:'lfoWaveFreq',
-     49:'lfoHorizAmp', 50:'lfoVertAmp', 53:'lfoOffsetX', 54:'lfoOffsetY'
+     38:'lfoShapeX', 39:'lfoShapeY', 44:'lfoWaveAmp', 45:'lfoWaveFreqX',
+     56:'lfoWaveFreqY', 49:'lfoHorizAmp', 50:'lfoVertAmp',
+     53:'lfoOffsetX', 54:'lfoOffsetY'
   };
   const id = midiMap[cc];
   if (!id) return;
