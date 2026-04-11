@@ -1109,7 +1109,7 @@ function renderLoop() {
       else if (target === 'waveAmp')  waveAmp    += a * 200;
       else if (target === 'shapeX')   shapeX      = Math.max(-1, Math.min(1, shapeX + a));
       else if (target === 'shapeY')   shapeY      = Math.max(-1, Math.min(1, shapeY + a));
-      else if (target === 'hueShift') hueShift   += a * 180;
+      else if (target === 'hueShift') hueShift   += a * 720;
       else if (target === 'sat')      saturation  = Math.max(0, saturation + a);
       else if (target === 'scale')    scl        += a * 1.5;
       else if (target === 'fog')      fog         = Math.min(1, fog + a);
@@ -1463,15 +1463,18 @@ function getLFOValue(type, freq, phaseOffset) {
 
 // --- Camera / media ----------------------------------------------------------
 function startTabCapture() {
-  navigator.mediaDevices.getDisplayMedia({ video: { mediaSource: 'screen' }, audio: false })
+  navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
     .then(stream => {
       if (cam) { cam.remove(); cam = null; }
       uploadedMedia = null; uploadedType = null; currentSourceReady = false;
       hideVideoControls();
       const vid = document.createElement('video');
       vid.srcObject = stream;
-      vid.autoplay = true;
       vid.muted = true;
+      vid.playsInline = true;
+      document.body.appendChild(vid);
+      vid.style.cssText = 'position:absolute;visibility:hidden;width:1px;height:1px;top:-9999px';
+      vid.play().catch(() => {});
       vid.onloadedmetadata = () => {
         uploadedMedia = {
           get width()  { return vid.videoWidth  || 640; },
@@ -1481,10 +1484,24 @@ function startTabCapture() {
         uploadedType = 'tabcapture';
         currentSourceReady = true;
         showToast('Tab capture active');
+        // Route audio from same capture to analyser if not already running
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0 && !audioCtx) {
+          audioCtx       = new AudioContext();
+          audioAnalyser  = audioCtx.createAnalyser();
+          audioAnalyser.fftSize = 1024;
+          audioAnalyser.smoothingTimeConstant = 0;
+          audioDataArray = new Float32Array(audioAnalyser.frequencyBinCount);
+          audioStream    = stream;
+          audioCtx.createMediaStreamSource(stream).connect(audioAnalyser);
+          audioStartBtn.html('Stop Audio');
+          document.getElementById('audioMeterGroup').style.opacity = '1';
+        }
       };
       stream.getVideoTracks()[0].addEventListener('ended', () => {
+        vid.remove();
         uploadedMedia = null; uploadedType = null; currentSourceReady = false;
-        showToast('Tab capture ended — camera resuming');
+        showToast('Tab capture ended \u2014 camera resuming');
         startCam(selectedDeviceId);
       });
     })
