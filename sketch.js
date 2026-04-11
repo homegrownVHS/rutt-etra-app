@@ -26,6 +26,12 @@ let fovSlider, lightAmtSlider, lightAzSlider, lightElSlider;
 let lineWidthSlider;
 let depthColorizeSlider, depthColorPaletteSelect;
 
+// --- Audio reactivity globals ------------------------------------------------
+let audioCtx = null, audioAnalyser = null, audioDataArray = null, audioStream = null;
+let audioBass = 0, audioMid = 0, audioTreble = 0;
+let audioStartBtn, audioSourceSelect, audioSensSlider, audioSmoothSlider;
+let audioBassTargetSelect, audioMidTargetSelect, audioTrebleTargetSelect, audioAmtSlider;
+
 // Uniform location caches – populated on first use, valid for program lifetime
 let progUniCache = {}, blurUniCache = {}, compUniCache = {};
 
@@ -786,6 +792,17 @@ function setup() {
   downloadBtn = select("#downloadBtn");
   downloadBtn.mousePressed(saveImage);
 
+  // Audio reactivity
+  audioStartBtn           = select('#audioStartBtn');
+  audioSourceSelect       = select('#audioSourceSelect');
+  audioSensSlider         = select('#audioSensSlider');
+  audioSmoothSlider       = select('#audioSmoothSlider');
+  audioBassTargetSelect   = select('#audioBassTargetSelect');
+  audioMidTargetSelect    = select('#audioMidTargetSelect');
+  audioTrebleTargetSelect = select('#audioTrebleTargetSelect');
+  audioAmtSlider          = select('#audioAmtSlider');
+  audioStartBtn.mousePressed(startAudio);
+
   vidPlayPauseBtn = select("#vidPlayPauseBtn");
   vidPlayPauseBtn.mousePressed(() => {
     if (!uploadedMedia || uploadedType !== 'video') return;
@@ -962,6 +979,61 @@ function hideVideoControls() {
   document.getElementById('videoControls').style.display = 'none';
   document.getElementById('videoScrubGroup').style.display = 'none';
 }
+
+// --- Audio capture -----------------------------------------------------------
+function startAudio() {
+  if (audioCtx) { stopAudio(); return; }
+  const srcMode = audioSourceSelect.value();
+  const prom = srcMode === 'mic'
+    ? navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    : navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  prom.then(stream => {
+    audioStream = stream;
+    stream.getVideoTracks().forEach(t => t.stop()); // drop video – we only need audio
+    audioCtx      = new AudioContext();
+    audioAnalyser = audioCtx.createAnalyser();
+    audioAnalyser.fftSize = 1024;
+    audioAnalyser.smoothingTimeConstant = 0; // we apply per-frame EMA ourselves
+    audioDataArray = new Float32Array(audioAnalyser.frequencyBinCount);
+    audioCtx.createMediaStreamSource(stream).connect(audioAnalyser);
+    audioStartBtn.html('Stop Audio');
+    document.getElementById('audioMeterGroup').style.opacity = '1';
+  }).catch(e => {
+    console.error('Audio capture error:', e);
+    showToast('Audio capture failed – ' + e.message);
+  });
+}
+
+function stopAudio() {
+  if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
+  if (audioCtx)   { audioCtx.close(); audioCtx = null; }
+  audioAnalyser = null; audioDataArray = null;
+  audioBass = audioMid = audioTreble = 0;
+  audioStartBtn.html('Start');
+  document.getElementById('audioMeterGroup').style.opacity = '0.4';
+}
+
+function updateAudioBands() {
+  if (!audioAnalyser || !audioDataArray) return;
+  audioAnalyser.getFloatFrequencyData(audioDataArray);
+  const binHz  = audioCtx.sampleRate / (audioAnalyser.frequencyBinCount * 2);
+  const sens   = Number(audioSensSlider.value());
+  const smooth = Number(audioSmoothSlider.value());
+  function bandEnergy(loHz, hiHz) {
+    const lo = Math.max(1, Math.floor(loHz / binHz));
+    const hi = Math.min(audioAnalyser.frequencyBinCount - 1, Math.ceil(hiHz / binHz));
+    let sum = 0, n = 0;
+    for (let i = lo; i <= hi; i++) { sum += Math.pow(10, audioDataArray[i] / 20); n++; }
+    return n > 0 ? sum / n : 0;
+  }
+  const rb = Math.min(1, bandEnergy(60,   250)  * sens);
+  const rm = Math.min(1, bandEnergy(250,  2000) * sens);
+  const rt = Math.min(1, bandEnergy(2000, 8000) * sens);
+  audioBass   = audioBass   * smooth + rb * (1 - smooth);
+  audioMid    = audioMid    * smooth + rm * (1 - smooth);
+  audioTreble = audioTreble * smooth + rt * (1 - smooth);
+}
+
 function renderLoop() {
   requestAnimationFrame(renderLoop);
 
@@ -983,14 +1055,14 @@ function renderLoop() {
   const lfoPhaseOffset = Number(lfoPhaseOffsetSlider.value());
   const lfo = getLFOValue(lfoType, lfoFreq, lfoPhaseOffset);
 
-  const depth  = baseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
+  let depth  = baseDepth + (lfoDepth.checked() ? lfo * 300 * lfoAmp : 0);
   const tiltX  = baseTiltX + (lfoTiltX.checked() ? lfo * Math.PI * lfoAmp : 0);
   const tiltY  = baseTiltY + (lfoTiltY.checked() ? lfo * Math.PI * lfoAmp : 0);
-  const scl    = baseScale + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
+  let scl    = baseScale + (lfoScale.checked() ? lfo * 1.5 * lfoAmp : 0);
 
-  const shapeX    = Math.max(-1, Math.min(1, (Number(shapeXSlider.value()) + (lfoShapeX.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
-  const shapeY    = Math.max(-1, Math.min(1, (Number(shapeYSlider.value()) + (lfoShapeY.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
-  const waveAmp   = Number(waveAmpSlider.value()) + (lfoWaveAmp.checked() ? lfo * 200 * lfoAmp : 0);
+  let shapeX    = Math.max(-1, Math.min(1, (Number(shapeXSlider.value()) + (lfoShapeX.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
+  let shapeY    = Math.max(-1, Math.min(1, (Number(shapeYSlider.value()) + (lfoShapeY.checked()  ? lfo * 50 * lfoAmp : 0)) / 100));
+  let waveAmp   = Number(waveAmpSlider.value()) + (lfoWaveAmp.checked() ? lfo * 200 * lfoAmp : 0);
   const waveFreqX = Math.max(0, Number(waveFreqXSlider.value()) + (lfoWaveFreqX.checked() ? lfo * 20 * lfoAmp : 0));
   const waveFreqY = Math.max(0, Number(waveFreqYSlider.value()) + (lfoWaveFreqY.checked() ? lfo * 20 * lfoAmp : 0));
 
@@ -1004,13 +1076,13 @@ function renderLoop() {
   const chromaShift = Number(chromaSlider.value());
   const sheen       = Number(sheenSlider.value());
   const contact     = Number(contactSlider.value());
-  const fog         = Number(fogSlider.value());
+  let fog         = Number(fogSlider.value());
   const fogInvert   = fogInvertChk.elt.checked ? 1 : 0;
   const bloomAmt       = Number(bloomSlider.value());
   const depthColorize  = Number(depthColorizeSlider.value());
   const depthColorPalette = parseInt(depthColorPaletteSelect.value());
-  const hueShift    = Number(hueShiftSlider.value()) + (lfoHueShift.checked() ? lfo * 180 * lfoAmp : 0);
-  const saturation  = Math.max(0, Number(satSlider.value())   + (lfoSat.checked()     ? lfo * 1.0 * lfoAmp : 0));
+  let hueShift    = Number(hueShiftSlider.value()) + (lfoHueShift.checked() ? lfo * 180 * lfoAmp : 0);
+  let saturation  = Math.max(0, Number(satSlider.value())   + (lfoSat.checked()     ? lfo * 1.0 * lfoAmp : 0));
   const depthMin    = Number(depthMinSlider.value()) / 100.0;
   const depthMax    = Number(depthMaxSlider.value()) / 100.0;
   const invertDepth = invertDepthChk.elt.checked ? 1 : 0;
@@ -1023,6 +1095,26 @@ function renderLoop() {
   const lightAz     = Number(lightAzSlider.value()) * Math.PI / 180.0;
   const lightEl     = Number(lightElSlider.value()) * Math.PI / 180.0;
   const lineWidth   = Number(lineWidthSlider.value());
+
+  // --- Audio reactivity -------------------------------------------------------
+  updateAudioBands();
+  {
+    const audioAmt = Number(audioAmtSlider.value());
+    const _ab = (target, band) => {
+      const a = band * audioAmt;
+      if      (target === 'depth')    depth      += a * 300;
+      else if (target === 'waveAmp')  waveAmp    += a * 200;
+      else if (target === 'shapeX')   shapeX      = Math.max(-1, Math.min(1, shapeX + a));
+      else if (target === 'shapeY')   shapeY      = Math.max(-1, Math.min(1, shapeY + a));
+      else if (target === 'hueShift') hueShift   += a * 180;
+      else if (target === 'sat')      saturation  = Math.max(0, saturation + a);
+      else if (target === 'scale')    scl        += a * 1.5;
+      else if (target === 'fog')      fog         = Math.min(1, fog + a);
+    };
+    _ab(audioBassTargetSelect.value(),   audioBass);
+    _ab(audioMidTargetSelect.value(),    audioMid);
+    _ab(audioTrebleTargetSelect.value(), audioTreble);
+  }
 
   // Update video scrubber
   if (uploadedType === 'video' && uploadedMedia) {
@@ -1068,6 +1160,13 @@ function renderLoop() {
   select("#lightElLabel").html(Math.round(lightEl * 180 / Math.PI) + '\u00B0');
   select("#lineWidthLabel").html(lineWidth.toFixed(2));
   select("#lfoPhaseOffsetLabel").html(Math.round(lfoPhaseOffset) + '\u00B0');
+  if (audioAnalyser) {
+    const bar = v => '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588'[Math.min(7, Math.round(v * 7))];
+    select('#audioMeterLabel').html('B' + bar(audioBass) + ' M' + bar(audioMid) + ' T' + bar(audioTreble));
+  }
+  select('#audioSensLabel').html(Number(audioSensSlider.value()).toFixed(1));
+  select('#audioSmoothLabel').html(Number(audioSmoothSlider.value()).toFixed(2));
+  select('#audioAmtLabel').html(Number(audioAmtSlider.value()).toFixed(2));
   // Smooth rotation
   rotX += (targetRotX - rotX) * 0.1;
   rotY += (targetRotY - rotY) * 0.1;
@@ -1464,6 +1563,9 @@ function resetParams() {
     ['#lightElSlider',       '45'],
     ['#lineWidthSlider',     '0.48'],
     ['#depthColorizeSlider', '0'],
+    ['#audioSensSlider',     '5'],
+    ['#audioSmoothSlider',   '0.8'],
+    ['#audioAmtSlider',      '1'],
   ];
   defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
   document.querySelector('#scanModeSelect').value = 'H';

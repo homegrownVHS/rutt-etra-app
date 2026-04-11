@@ -299,6 +299,73 @@
       <input type="range" id="lfoPhaseOffsetSlider" min="0" max="360" value="0" step="1">
     </div>
 
+    <!-- AUDIO -->
+    <div class="ctrl-section">Audio Reactivity</div>
+    <div class="control-group row2col">
+      <select id="audioSourceSelect">
+        <option value="loopback">System Loopback</option>
+        <option value="mic">Microphone</option>
+      </select>
+      <button id="audioStartBtn">Start</button>
+    </div>
+    <div class="control-group" id="audioMeterGroup" style="opacity:0.4">
+      <label id="audioMeterLabel" style="font-family:monospace;letter-spacing:3px">B▁ M▁ T▁</label>
+    </div>
+    <div class="control-group">
+      <label>Sensitivity <span id="audioSensLabel">5.0</span></label>
+      <input type="range" id="audioSensSlider" min="1" max="20" value="5" step="0.5">
+    </div>
+    <div class="control-group">
+      <label>Smoothing <span id="audioSmoothLabel">0.80</span></label>
+      <input type="range" id="audioSmoothSlider" min="0" max="0.99" value="0.8" step="0.01">
+    </div>
+    <div class="control-group">
+      <label>Bass drives</label>
+      <select id="audioBassTargetSelect">
+        <option value="none">— Off —</option>
+        <option value="depth">Depth</option>
+        <option value="waveAmp">Wave Amp</option>
+        <option value="shapeX">Sphere H</option>
+        <option value="shapeY">Sphere V</option>
+        <option value="hueShift">Hue Shift</option>
+        <option value="sat">Saturation</option>
+        <option value="scale">Scale</option>
+        <option value="fog">Fog</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Mid drives</label>
+      <select id="audioMidTargetSelect">
+        <option value="none">— Off —</option>
+        <option value="depth">Depth</option>
+        <option value="waveAmp">Wave Amp</option>
+        <option value="shapeX">Sphere H</option>
+        <option value="shapeY">Sphere V</option>
+        <option value="hueShift">Hue Shift</option>
+        <option value="sat">Saturation</option>
+        <option value="scale">Scale</option>
+        <option value="fog">Fog</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Treble drives</label>
+      <select id="audioTrebleTargetSelect">
+        <option value="none">— Off —</option>
+        <option value="depth">Depth</option>
+        <option value="waveAmp">Wave Amp</option>
+        <option value="shapeX">Sphere H</option>
+        <option value="shapeY">Sphere V</option>
+        <option value="hueShift">Hue Shift</option>
+        <option value="sat">Saturation</option>
+        <option value="scale">Scale</option>
+        <option value="fog">Fog</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Amount <span id="audioAmtLabel">1.00</span></label>
+      <input type="range" id="audioAmtSlider" min="0" max="2" value="1" step="0.01">
+    </div>
+
     <!-- UTILITY -->
     <div class="ctrl-section">Utility</div>
     <div class="control-group row2col">
