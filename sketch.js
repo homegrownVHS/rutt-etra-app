@@ -1107,14 +1107,14 @@ function renderLoop() {
   {
     const _ab = (target, band, amt) => {
       const a = band * amt;
-      if      (target === 'depth')    depth      += a * 300;
-      else if (target === 'waveAmp')  waveAmp    += a * 200;
-      else if (target === 'shapeX')   shapeX      = Math.max(-1, Math.min(1, shapeX + a));
-      else if (target === 'shapeY')   shapeY      = Math.max(-1, Math.min(1, shapeY + a));
-      else if (target === 'hueShift') hueShift   += a * 720;
-      else if (target === 'sat')      saturation  = Math.max(0, saturation + a);
-      else if (target === 'scale')    scl        += a * 1.5;
-      else if (target === 'fog')      fog         = Math.min(1, fog + a);
+      if      (target === 'depth')    depth      += a * 1200;
+      else if (target === 'waveAmp')  waveAmp    += a * 800;
+      else if (target === 'shapeX')   shapeX      = Math.max(-1, Math.min(1, shapeX + a * 4));
+      else if (target === 'shapeY')   shapeY      = Math.max(-1, Math.min(1, shapeY + a * 4));
+      else if (target === 'hueShift') hueShift   += a * 2880;
+      else if (target === 'sat')      saturation  = Math.max(0, saturation + a * 4);
+      else if (target === 'scale')    scl        += a * 6;
+      else if (target === 'fog')      fog         = Math.min(1, fog + a * 4);
       else if (target === 'chroma')   chromaShift = Math.min(0.05, chromaShift + a);
     };
     _ab(audioBassTargetSelect.value(),   audioBass,   Number(audioBassAmtSlider.value()));
