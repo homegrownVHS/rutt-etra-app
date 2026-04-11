@@ -789,8 +789,9 @@ function setup() {
   lfoOffsetX    = select("#lfoOffsetX");
   lfoOffsetY    = select("#lfoOffsetY");
 
-  select("#resetParamsBtn").mousePressed(resetParams);
-  downloadBtn = select("#downloadBtn");
+  select('#resetParamsBtn').mousePressed(resetParams);
+  select('#tabCaptureBtn').mousePressed(startTabCapture);
+  downloadBtn = select('#downloadBtn');
   downloadBtn.mousePressed(saveImage);
 
   // Audio reactivity
@@ -1112,7 +1113,7 @@ function renderLoop() {
       else if (target === 'sat')      saturation  = Math.max(0, saturation + a);
       else if (target === 'scale')    scl        += a * 1.5;
       else if (target === 'fog')      fog         = Math.min(1, fog + a);
-      else if (target === 'chroma')   chromaShift = Math.min(0.05, chromaShift + a * 0.05);
+      else if (target === 'chroma')   chromaShift = Math.min(0.05, chromaShift + a);
     };
     _ab(audioBassTargetSelect.value(),   audioBass,   Number(audioBassAmtSlider.value()));
     _ab(audioMidTargetSelect.value(),    audioMid,    Number(audioMidAmtSlider.value()));
@@ -1461,6 +1462,38 @@ function getLFOValue(type, freq, phaseOffset) {
 }
 
 // --- Camera / media ----------------------------------------------------------
+function startTabCapture() {
+  navigator.mediaDevices.getDisplayMedia({ video: { mediaSource: 'screen' }, audio: false })
+    .then(stream => {
+      if (cam) { cam.remove(); cam = null; }
+      uploadedMedia = null; uploadedType = null; currentSourceReady = false;
+      hideVideoControls();
+      const vid = document.createElement('video');
+      vid.srcObject = stream;
+      vid.autoplay = true;
+      vid.muted = true;
+      vid.onloadedmetadata = () => {
+        uploadedMedia = {
+          get width()  { return vid.videoWidth  || 640; },
+          get height() { return vid.videoHeight || 480; },
+          elt: vid
+        };
+        uploadedType = 'tabcapture';
+        currentSourceReady = true;
+        showToast('Tab capture active');
+      };
+      stream.getVideoTracks()[0].addEventListener('ended', () => {
+        uploadedMedia = null; uploadedType = null; currentSourceReady = false;
+        showToast('Tab capture ended — camera resuming');
+        startCam(selectedDeviceId);
+      });
+    })
+    .catch(e => {
+      console.error('Tab capture error:', e);
+      showToast('Tab capture failed: ' + e.message);
+    });
+}
+
 function startCam(deviceId) {
   uploadedMedia = null; uploadedType = null; currentSourceReady = false;
   if (cam) cam.remove();
