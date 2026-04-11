@@ -30,7 +30,8 @@ let depthColorizeSlider, depthColorPaletteSelect;
 let audioCtx = null, audioAnalyser = null, audioDataArray = null, audioStream = null;
 let audioBass = 0, audioMid = 0, audioTreble = 0;
 let audioStartBtn, audioSourceSelect, audioSensSlider, audioSmoothSlider;
-let audioBassTargetSelect, audioMidTargetSelect, audioTrebleTargetSelect, audioAmtSlider;
+let audioBassTargetSelect, audioMidTargetSelect, audioTrebleTargetSelect;
+let audioBassAmtSlider, audioMidAmtSlider, audioTrebleAmtSlider;
 
 // Uniform location caches – populated on first use, valid for program lifetime
 let progUniCache = {}, blurUniCache = {}, compUniCache = {};
@@ -800,7 +801,9 @@ function setup() {
   audioBassTargetSelect   = select('#audioBassTargetSelect');
   audioMidTargetSelect    = select('#audioMidTargetSelect');
   audioTrebleTargetSelect = select('#audioTrebleTargetSelect');
-  audioAmtSlider          = select('#audioAmtSlider');
+  audioBassAmtSlider      = select('#audioBassAmtSlider');
+  audioMidAmtSlider       = select('#audioMidAmtSlider');
+  audioTrebleAmtSlider    = select('#audioTrebleAmtSlider');
   audioStartBtn.mousePressed(startAudio);
 
   vidPlayPauseBtn = select("#vidPlayPauseBtn");
@@ -1099,9 +1102,8 @@ function renderLoop() {
   // --- Audio reactivity -------------------------------------------------------
   updateAudioBands();
   {
-    const audioAmt = Number(audioAmtSlider.value());
-    const _ab = (target, band) => {
-      const a = band * audioAmt;
+    const _ab = (target, band, amt) => {
+      const a = band * amt;
       if      (target === 'depth')    depth      += a * 300;
       else if (target === 'waveAmp')  waveAmp    += a * 200;
       else if (target === 'shapeX')   shapeX      = Math.max(-1, Math.min(1, shapeX + a));
@@ -1112,9 +1114,9 @@ function renderLoop() {
       else if (target === 'fog')      fog         = Math.min(1, fog + a);
       else if (target === 'chroma')   chromaShift = Math.min(0.05, chromaShift + a * 0.05);
     };
-    _ab(audioBassTargetSelect.value(),   audioBass);
-    _ab(audioMidTargetSelect.value(),    audioMid);
-    _ab(audioTrebleTargetSelect.value(), audioTreble);
+    _ab(audioBassTargetSelect.value(),   audioBass,   Number(audioBassAmtSlider.value()));
+    _ab(audioMidTargetSelect.value(),    audioMid,    Number(audioMidAmtSlider.value()));
+    _ab(audioTrebleTargetSelect.value(), audioTreble, Number(audioTrebleAmtSlider.value()));
   }
 
   // Update video scrubber
@@ -1167,7 +1169,9 @@ function renderLoop() {
   }
   select('#audioSensLabel').html(Number(audioSensSlider.value()).toFixed(1));
   select('#audioSmoothLabel').html(Number(audioSmoothSlider.value()).toFixed(2));
-  select('#audioAmtLabel').html(Number(audioAmtSlider.value()).toFixed(2));
+  select('#audioBassAmtLabel').html(Number(audioBassAmtSlider.value()).toFixed(2));
+  select('#audioMidAmtLabel').html(Number(audioMidAmtSlider.value()).toFixed(2));
+  select('#audioTrebleAmtLabel').html(Number(audioTrebleAmtSlider.value()).toFixed(2));
   // Smooth rotation
   rotX += (targetRotX - rotX) * 0.1;
   rotY += (targetRotY - rotY) * 0.1;
@@ -1564,9 +1568,11 @@ function resetParams() {
     ['#lightElSlider',       '45'],
     ['#lineWidthSlider',     '0.48'],
     ['#depthColorizeSlider', '0'],
-    ['#audioSensSlider',     '5'],
-    ['#audioSmoothSlider',   '0.8'],
-    ['#audioAmtSlider',      '1'],
+    ['#audioSensSlider',       '5'],
+    ['#audioSmoothSlider',     '0.8'],
+    ['#audioBassAmtSlider',    '1'],
+    ['#audioMidAmtSlider',     '1'],
+    ['#audioTrebleAmtSlider',  '1'],
   ];
   defaults.forEach(([sel, val]) => { document.querySelector(sel).value = val; });
   document.querySelector('#scanModeSelect').value = 'H';
