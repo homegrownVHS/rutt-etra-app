@@ -1073,7 +1073,7 @@ function renderLoop() {
   const offsetY  = Number(offsetYSlider.value()) + (lfoOffsetY.checked() ? lfo * 100 * lfoAmp : 0);
 
   const gamma       = Math.max(0.01, Number(gammaSlider.value()));
-  const chromaShift = Number(chromaSlider.value());
+  let chromaShift = Number(chromaSlider.value());
   const sheen       = Number(sheenSlider.value());
   const contact     = Number(contactSlider.value());
   let fog         = Number(fogSlider.value());
@@ -1110,6 +1110,7 @@ function renderLoop() {
       else if (target === 'sat')      saturation  = Math.max(0, saturation + a);
       else if (target === 'scale')    scl        += a * 1.5;
       else if (target === 'fog')      fog         = Math.min(1, fog + a);
+      else if (target === 'chroma')   chromaShift = Math.min(0.05, chromaShift + a * 0.05);
     };
     _ab(audioBassTargetSelect.value(),   audioBass);
     _ab(audioMidTargetSelect.value(),    audioMid);
