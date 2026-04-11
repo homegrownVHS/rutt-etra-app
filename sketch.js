@@ -29,7 +29,8 @@ let depthColorizeSlider, depthColorPaletteSelect;
 // --- Audio reactivity globals ------------------------------------------------
 let audioCtx = null, audioAnalyser = null, audioDataArray = null, audioStream = null;
 let audioBass = 0, audioMid = 0, audioTreble = 0;
-let audioStartBtn, audioSourceSelect, audioSensSlider, audioSmoothSlider;
+let audioStartBtn, audioSourceSelect;
+let audioBassAudio, audioMidAudio, audioTrebleAudio; // per-band {sens, smooth} slider pairs
 let audioBassTargetSelect, audioMidTargetSelect, audioTrebleTargetSelect;
 let audioBassAmtSlider, audioMidAmtSlider, audioTrebleAmtSlider;
 
@@ -797,8 +798,9 @@ function setup() {
   // Audio reactivity
   audioStartBtn           = select('#audioStartBtn');
   audioSourceSelect       = select('#audioSourceSelect');
-  audioSensSlider         = select('#audioSensSlider');
-  audioSmoothSlider       = select('#audioSmoothSlider');
+  audioBassAudio   = { sens: select('#audioBassSens'),   smooth: select('#audioBassSmooth') };
+  audioMidAudio    = { sens: select('#audioMidSens'),    smooth: select('#audioMidSmooth') };
+  audioTrebleAudio = { sens: select('#audioTrebleSens'), smooth: select('#audioTrebleSmooth') };
   audioBassTargetSelect   = select('#audioBassTargetSelect');
   audioMidTargetSelect    = select('#audioMidTargetSelect');
   audioTrebleTargetSelect = select('#audioTrebleTargetSelect');
@@ -1020,9 +1022,7 @@ function stopAudio() {
 function updateAudioBands() {
   if (!audioAnalyser || !audioDataArray) return;
   audioAnalyser.getFloatFrequencyData(audioDataArray);
-  const binHz  = audioCtx.sampleRate / (audioAnalyser.frequencyBinCount * 2);
-  const sens   = Number(audioSensSlider.value());
-  const smooth = Number(audioSmoothSlider.value());
+  const binHz = audioCtx.sampleRate / (audioAnalyser.frequencyBinCount * 2);
   function bandEnergy(loHz, hiHz) {
     const lo = Math.max(1, Math.floor(loHz / binHz));
     const hi = Math.min(audioAnalyser.frequencyBinCount - 1, Math.ceil(hiHz / binHz));
@@ -1030,12 +1030,14 @@ function updateAudioBands() {
     for (let i = lo; i <= hi; i++) { sum += Math.pow(10, audioDataArray[i] / 20); n++; }
     return n > 0 ? sum / n : 0;
   }
-  const rb = Math.min(1, bandEnergy(60,   250)  * sens);
-  const rm = Math.min(1, bandEnergy(250,  2000) * sens);
-  const rt = Math.min(1, bandEnergy(2000, 8000) * sens);
-  audioBass   = audioBass   * smooth + rb * (1 - smooth);
-  audioMid    = audioMid    * smooth + rm * (1 - smooth);
-  audioTreble = audioTreble * smooth + rt * (1 - smooth);
+  function applyBand(prev, loHz, hiHz, sensEl, smoothEl) {
+    const s = Number(sensEl.value()), sm = Number(smoothEl.value());
+    const r = Math.min(1, bandEnergy(loHz, hiHz) * s);
+    return prev * sm + r * (1 - sm);
+  }
+  audioBass   = applyBand(audioBass,   60,   250,  audioBassAudio.sens,   audioBassAudio.smooth);
+  audioMid    = applyBand(audioMid,    250,  2000, audioMidAudio.sens,    audioMidAudio.smooth);
+  audioTreble = applyBand(audioTreble, 2000, 8000, audioTrebleAudio.sens, audioTrebleAudio.smooth);
 }
 
 function renderLoop() {
@@ -1168,11 +1170,15 @@ function renderLoop() {
     const bar = v => '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588'[Math.min(7, Math.round(v * 7))];
     select('#audioMeterLabel').html('B' + bar(audioBass) + ' M' + bar(audioMid) + ' T' + bar(audioTreble));
   }
-  select('#audioSensLabel').html(Number(audioSensSlider.value()).toFixed(1));
-  select('#audioSmoothLabel').html(Number(audioSmoothSlider.value()).toFixed(2));
   select('#audioBassAmtLabel').html(Number(audioBassAmtSlider.value()).toFixed(2));
   select('#audioMidAmtLabel').html(Number(audioMidAmtSlider.value()).toFixed(2));
   select('#audioTrebleAmtLabel').html(Number(audioTrebleAmtSlider.value()).toFixed(2));
+  select('#audioBassSensLabel').html(Number(audioBassAudio.sens.value()).toFixed(1));
+  select('#audioBassSmthLabel').html(Number(audioBassAudio.smooth.value()).toFixed(2));
+  select('#audioMidSensLabel').html(Number(audioMidAudio.sens.value()).toFixed(1));
+  select('#audioMidSmthLabel').html(Number(audioMidAudio.smooth.value()).toFixed(2));
+  select('#audioTrebleSensLabel').html(Number(audioTrebleAudio.sens.value()).toFixed(1));
+  select('#audioTrebleSmthLabel').html(Number(audioTrebleAudio.smooth.value()).toFixed(2));
   // Smooth rotation
   rotX += (targetRotX - rotX) * 0.1;
   rotY += (targetRotY - rotY) * 0.1;
@@ -1618,8 +1624,12 @@ function resetParams() {
     ['#lightElSlider',       '45'],
     ['#lineWidthSlider',     '0.48'],
     ['#depthColorizeSlider', '0'],
-    ['#audioSensSlider',       '5'],
-    ['#audioSmoothSlider',     '0.8'],
+    ['#audioBassSens',      '5'],
+    ['#audioBassSmooth',    '0.8'],
+    ['#audioMidSens',       '5'],
+    ['#audioMidSmooth',     '0.8'],
+    ['#audioTrebleSens',    '5'],
+    ['#audioTrebleSmooth',  '0.8'],
     ['#audioBassAmtSlider',    '1'],
     ['#audioMidAmtSlider',     '1'],
     ['#audioTrebleAmtSlider',  '1'],

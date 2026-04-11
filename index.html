@@ -315,14 +315,6 @@
       <label id="audioMeterLabel" style="font-family:monospace;letter-spacing:3px">B▁ M▁ T▁</label>
     </div>
     <div class="control-group">
-      <label>Sensitivity <span id="audioSensLabel">5.0</span></label>
-      <input type="range" id="audioSensSlider" min="1" max="20" value="5" step="0.5">
-    </div>
-    <div class="control-group">
-      <label>Smoothing <span id="audioSmoothLabel">0.80</span></label>
-      <input type="range" id="audioSmoothSlider" min="0" max="0.99" value="0.8" step="0.01">
-    </div>
-    <div class="control-group">
       <label>Bass drives</label>
       <select id="audioBassTargetSelect">
         <option value="none">— Off —</option>
@@ -338,6 +330,10 @@
       </select>
       <label class="sub">Amt <span id="audioBassAmtLabel">1.00</span></label>
       <input type="range" id="audioBassAmtSlider" min="0" max="2" value="1" step="0.01">
+      <label class="sub">Sens <span id="audioBassSensLabel">5.0</span></label>
+      <input type="range" id="audioBassSens" min="1" max="20" value="5" step="0.5">
+      <label class="sub">Smooth <span id="audioBassSmthLabel">0.80</span></label>
+      <input type="range" id="audioBassSmooth" min="0" max="0.99" value="0.8" step="0.01">
     </div>
     <div class="control-group">
       <label>Mid drives</label>
@@ -355,6 +351,10 @@
       </select>
       <label class="sub">Amt <span id="audioMidAmtLabel">1.00</span></label>
       <input type="range" id="audioMidAmtSlider" min="0" max="2" value="1" step="0.01">
+      <label class="sub">Sens <span id="audioMidSensLabel">5.0</span></label>
+      <input type="range" id="audioMidSens" min="1" max="20" value="5" step="0.5">
+      <label class="sub">Smooth <span id="audioMidSmthLabel">0.80</span></label>
+      <input type="range" id="audioMidSmooth" min="0" max="0.99" value="0.8" step="0.01">
     </div>
     <div class="control-group">
       <label>Treble drives</label>
@@ -372,6 +372,10 @@
       </select>
       <label class="sub">Amt <span id="audioTrebleAmtLabel">1.00</span></label>
       <input type="range" id="audioTrebleAmtSlider" min="0" max="2" value="1" step="0.01">
+      <label class="sub">Sens <span id="audioTrebleSensLabel">5.0</span></label>
+      <input type="range" id="audioTrebleSens" min="1" max="20" value="5" step="0.5">
+      <label class="sub">Smooth <span id="audioTrebleSmthLabel">0.80</span></label>
+      <input type="range" id="audioTrebleSmooth" min="0" max="0.99" value="0.8" step="0.01">
     </div>
 
     <!-- UTILITY -->
